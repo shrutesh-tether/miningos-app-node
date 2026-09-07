@@ -160,6 +160,72 @@ test('setAlertParams - fans a single alert key out to all of its rack types', as
   })
 })
 
+test('setAlertParams - fans out a multi-field dcs alert added for configurable sensors', async (t) => {
+  const captured = []
+  const mockCtx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }] },
+    net_r0: {
+      jRequest: async (pk, method, params) => {
+        captured.push(params)
+        return { ok: true }
+      }
+    },
+    authLib: { tokenHasPerms: async () => true },
+    globalDataLib: {
+      setGlobalData: async (data, type) => ({ data, type })
+    }
+  })
+
+  const mockReq = {
+    _info: { authToken: 'token' },
+    body: {
+      data: { 'custom.speed.critical': { enabled: true, minSpeedHz: 10, maxSpeedHz: 60 } }
+    }
+  }
+
+  await setAlertParams(mockCtx, mockReq)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  t.alike(captured[0], {
+    byRackType: {
+      dcs: { 'custom.speed.critical': { enabled: true, minSpeedHz: 10, maxSpeedHz: 60 } }
+    }
+  }, 'should group the new dcs sensor alert under dcs')
+})
+
+test('setAlertParams - fans out a miner-only alert with no extra threshold fields', async (t) => {
+  const captured = []
+  const mockCtx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }] },
+    net_r0: {
+      jRequest: async (pk, method, params) => {
+        captured.push(params)
+        return { ok: true }
+      }
+    },
+    authLib: { tokenHasPerms: async () => true },
+    globalDataLib: {
+      setGlobalData: async (data, type) => ({ data, type })
+    }
+  })
+
+  const mockReq = {
+    _info: { authToken: 'token' },
+    body: {
+      data: { 'custom.wrong_miner_pool.warning': { enabled: true, notes: 'pool mismatch' } }
+    }
+  }
+
+  await setAlertParams(mockCtx, mockReq)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  t.alike(captured[0], {
+    byRackType: {
+      miner: { 'custom.wrong_miner_pool.warning': { enabled: true, notes: 'pool mismatch' } }
+    }
+  }, 'should group the new miner-only alert under miner and nowhere else')
+})
+
 test('setAlertParams - restricts users without alert_config_sensitive:w to updating notes only', async (t) => {
   const captured = []
   let capturedPerms
