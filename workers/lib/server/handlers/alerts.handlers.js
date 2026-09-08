@@ -304,27 +304,28 @@ function restrictToNotesOnly (submittedData, existingConfig) {
   return notesOnlyData
 }
 
+const NON_THRESHOLD_FIELDS = ['enabled', 'notes']
+
 // An alert's threshold fields are its configSchema keys other than `enabled`/`notes`.
-// With no thresholds it's always enabled; with thresholds it's enabled only once
-// every one of them has been configured. The submitted `enabled` value is ignored.
-function computeEnabled (alertKey, params) {
+function getThresholdFields (alertKey) {
   const configSchema = CUSTOM_ALERT_CONFIG[alertKey]?.configSchema
-  const thresholdFields = Object.keys(configSchema ?? {}).filter(
-    (field) => field !== 'enabled' && field !== 'notes'
+  return Object.keys(configSchema ?? {}).filter(
+    (field) => !NON_THRESHOLD_FIELDS.includes(field)
   )
-  if (!thresholdFields.length) return true
-  return thresholdFields.every((field) => params?.[field] !== undefined && params?.[field] !== null)
 }
 
-function applyEnabledFromThresholds (data) {
-  const result = {}
+// Enabling an alert requires every one of its threshold fields to already be configured.
+function assertEnabledParamsAreSet (data) {
   for (const alertKey in data) {
-    result[alertKey] = {
-      ...data[alertKey],
-      enabled: computeEnabled(alertKey, data[alertKey])
+    if (data[alertKey]?.enabled !== true) continue
+
+    const missing = getThresholdFields(alertKey).filter(
+      (field) => data[alertKey]?.[field] === undefined || data[alertKey]?.[field] === null
+    )
+    if (missing.length) {
+      throw new Error('ERR_ALERT_PARAMS_REQUIRED')
     }
   }
-  return result
 }
 
 async function setAlertParams (ctx, req) {
@@ -333,11 +334,13 @@ async function setAlertParams (ctx, req) {
   const sensitivePerm = `${AUTH_PERMISSIONS.ALERT_CONFIG_SENSITIVE}:${AUTH_LEVELS.WRITE}`
   const hasSensitivePerm = await ctx.authLib.tokenHasPerms(req._info.authToken, false, [sensitivePerm])
 
-  let data = applyEnabledFromThresholds(req.body.data)
+  let data = req.body.data
   if (!hasSensitivePerm) {
     const [existingConfig] = await ctx.globalDataLib.getGlobalData({ type })
     data = restrictToNotesOnly(data, existingConfig)
   }
+
+  assertEnabledParamsAreSet(data)
 
   const byRackType = {}
   for (const alertKey in data) {
@@ -417,8 +420,8 @@ module.exports = {
   getAlertParams,
   setAlertParams,
   restrictToNotesOnly,
-  computeEnabled,
-  applyEnabledFromThresholds,
+  getThresholdFields,
+  assertEnabledParamsAreSet,
   extractAlertsFromThings,
   matchesSearch,
   applySort,
