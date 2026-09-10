@@ -106,7 +106,7 @@ function applySort (items, sort) {
 }
 
 function buildSeveritySummary (alerts) {
-  const summary = { critical: 0, high: 0, medium: 0, low: 0, total: alerts.length }
+  const summary = { critical: 0, high: 0, medium: 0, low: 0, warning: 0, total: alerts.length }
   for (const alert of alerts) {
     if (SEVERITY_LEVELS.has(alert.severity)) {
       summary[alert.severity]++

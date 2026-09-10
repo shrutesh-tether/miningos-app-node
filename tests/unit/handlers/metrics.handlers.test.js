@@ -43,7 +43,12 @@ const {
   getMinersByType,
   processMinersByType,
   getInventoryMinerDistribution,
-  computeInstalledCapacity
+  computeInstalledCapacity,
+  getDowntime,
+  indexForecastDecisionsByHour,
+  buildHourlyDowntime,
+  aggregateDowntimeDaily,
+  calculateDowntimeSummary
 } = require('../../../workers/lib/server/handlers/metrics.handlers')
 const { withDataProxy } = require('../helpers/mockHelpers')
 
@@ -4175,4 +4180,325 @@ test('rollupMonthly - per-meter maps roll up meter by meter', (t) => {
   t.is(log.length, 1, 'single month')
   t.alike(log[0].consumptionMWh, { a: 0.72, b: 0.096 }, 'energy summed per meter')
   t.alike(log[0].powerW, { a: 15, b: 2 }, 'power averaged over the month days')
+})
+
+// ==================== Downtime Tests ====================
+
+const DOWNTIME_HOUR_MS = 60 * 60 * 1000
+const DOWNTIME_DAY_TS = 1700006400000
+
+function downtimeHourRow (hourTs, powerW) {
+  return { ts: `${hourTs}-${hourTs + DOWNTIME_HOUR_MS - 1}`, site_power_w: powerW }
+}
+
+function downtimeCtx ({ powerRows = [], forecast = [], globalConfig, featureConfig, onTailLog } = {}) {
+  return withDataProxy({
+    conf: {
+      orks: [{ rpcPublicKey: 'key1' }],
+      ...(featureConfig && { featureConfig })
+    },
+    net_r0: {
+      jRequest: async (key, method, payload) => {
+        if (method === 'getGlobalConfig') {
+          return globalConfig ?? { nominalPowerAvailability_MW: 10 }
+        }
+        if (method === 'getWrkExtData') {
+          if (forecast instanceof Error) throw forecast
+          return forecast
+        }
+        if (onTailLog) onTailLog(payload)
+        return powerRows
+      }
+    }
+  })
+}
+
+test('getDowntime - central DCS tails hourly site power from the DCS worker even for interval=1d', async (t) => {
+  let capturedPayload
+  const mockCtx = downtimeCtx({
+    featureConfig: { centralDCSSetup: { enabled: true, tag: 't-dcs-custom' } },
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 5000000)],
+    onTailLog: (payload) => { capturedPayload = payload }
+  })
+
+  await getDowntime(mockCtx, {
+    query: { start: 1700000000000, end: 1700100000000, interval: '1d' }
+  })
+
+  t.is(capturedPayload.type, 'dcs-siemens', 'should tail the DCS worker type')
+  t.is(capturedPayload.tag, 't-dcs-custom', 'should use the configured DCS tag')
+  t.is(capturedPayload.key, 'stat-30m', 'should read the fine-grained stat log')
+  t.is(capturedPayload.groupRange, '1H', 'should bucket hourly regardless of the response interval')
+  t.ok('site_power_w' in capturedPayload.fields, 'should project site_power_w')
+  t.ok('site_power_w' in capturedPayload.aggrFields, 'should aggregate site_power_w')
+  t.pass()
+})
+
+test('getDowntime - non-DCS falls back to the powermeter worker', async (t) => {
+  let capturedPayload
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 5000000)],
+    onTailLog: (payload) => { capturedPayload = payload }
+  })
+
+  await getDowntime(mockCtx, {
+    query: { start: 1700000000000, end: 1700100000000 }
+  })
+
+  t.is(capturedPayload.type, 'powermeter', 'should tail the powermeter worker type')
+  t.is(capturedPayload.tag, 't-powermeter', 'should use the powermeter tag')
+  t.pass()
+})
+
+test('getDowntime - shortfall on a mine hour is an operational issue', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 6000000)],
+    forecast: [{
+      hourlyForecast: [{ start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, decision: 'mine' }]
+    }]
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log.length, 1, 'one hourly bucket')
+  t.is(result.log[0].ts, DOWNTIME_DAY_TS, 'bucket start ts')
+  t.alike(result.log[0].timeRange,
+    { startTs: DOWNTIME_DAY_TS, endTs: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS - 1 },
+    'bucket time range')
+  t.is(result.log[0].powerW, 6000000, 'actual power')
+  t.is(result.log[0].nominalPowerW, 10000000, 'nominal power from global config')
+  t.is(result.log[0].downtimeRate, 0.4, '4 MW short of 10 MW nominal')
+  t.is(result.log[0].curtailmentRate, 0, 'no curtailment on a mine hour')
+  t.is(result.log[0].operationalIssuesRate, 0.4, 'shortfall attributed to op issues')
+  t.is(result.summary.avgDowntimeRate, 0.4, 'summary averages the buckets')
+  t.is(result.summary.hasForecastData, true, 'forecast data was present')
+  t.pass()
+})
+
+test('getDowntime - shortfall on a not_mine hour is curtailment', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 6000000)],
+    forecast: [{
+      hourlyForecast: [{ start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, decision: 'not_mine' }]
+    }]
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].downtimeRate, 0.4, 'same shortfall')
+  t.is(result.log[0].curtailmentRate, 0.4, 'attributed to curtailment')
+  t.is(result.log[0].operationalIssuesRate, 0, 'not an op issue')
+  t.is(result.summary.avgCurtailmentRate, 0.4, 'summary reflects curtailment')
+  t.is(result.summary.avgOperationalIssuesRate, 0, 'summary reflects no op issues')
+  t.pass()
+})
+
+test('getDowntime - hour missing from the forecast counts as op issues', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 6000000)],
+    forecast: [{ hourlyForecast: [] }]
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].curtailmentRate, 0, 'no forecast entry, so not curtailment')
+  t.is(result.log[0].operationalIssuesRate, 0.4, 'shortfall surfaces as op issues')
+  t.pass()
+})
+
+test('getDowntime - actual above nominal clamps all rates to zero', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 12000000)]
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].downtimeRate, 0, 'no downtime when over nominal')
+  t.is(result.log[0].curtailmentRate, 0, 'no curtailment')
+  t.is(result.log[0].operationalIssuesRate, 0, 'no op issues')
+  t.pass()
+})
+
+test('getDowntime - missing nominal power yields null rates but keeps the power series', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 6000000)],
+    globalConfig: {}
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].powerW, 6000000, 'power series still served')
+  t.is(result.log[0].nominalPowerW, null, 'nominal unconfigured')
+  t.is(result.log[0].downtimeRate, null, 'rate not computable')
+  t.is(result.log[0].curtailmentRate, null, 'rate not computable')
+  t.is(result.log[0].operationalIssuesRate, null, 'rate not computable')
+  t.is(result.summary.avgDowntimeRate, null, 'summary rate null')
+  t.is(result.summary.nominalPowerW, null, 'summary nominal null')
+  t.pass()
+})
+
+test('getDowntime - falls back to nominalAvailablePowerMWh when the MW key is absent', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 18000000)],
+    globalConfig: { nominalAvailablePowerMWh: 22.5 }
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].nominalPowerW, 22500000, 'MWh-per-hour capacity treated as MW')
+  t.is(result.log[0].downtimeRate, 0.2, 'rates computed against the fallback nominal')
+  t.pass()
+})
+
+test('getDowntime - electricity worker failure degrades to op-issues-only attribution', async (t) => {
+  const mockCtx = downtimeCtx({
+    powerRows: [downtimeHourRow(DOWNTIME_DAY_TS, 6000000)],
+    forecast: new Error('ERR_NO_ELECTRICITY_WORKER')
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.is(result.log[0].curtailmentRate, 0, 'nothing attributed to curtailment')
+  t.is(result.log[0].operationalIssuesRate, 0.4, 'shortfall kept visible as op issues')
+  t.is(result.summary.hasForecastData, false, 'flags that no forecast data was available')
+  t.pass()
+})
+
+test('getDowntime - empty power log returns an empty log and null summary values', async (t) => {
+  const mockCtx = downtimeCtx({ powerRows: [] })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, interval: '1h' }
+  })
+
+  t.alike(result.log, [], 'no buckets')
+  t.is(result.summary.avgDowntimeRate, null, 'null avg downtime')
+  t.is(result.summary.avgPowerW, null, 'null avg power')
+  t.is(result.summary.minPowerW, null, 'null min power')
+  t.is(result.summary.maxPowerW, null, 'null max power')
+  t.is(result.summary.nominalPowerW, 10000000, 'nominal still reported when configured')
+  t.pass()
+})
+
+test('getDowntime - interval=1d attributes hourly then aggregates per UTC day', async (t) => {
+  const day2 = DOWNTIME_DAY_TS + 24 * DOWNTIME_HOUR_MS
+  const mockCtx = downtimeCtx({
+    powerRows: [
+      downtimeHourRow(DOWNTIME_DAY_TS, 5000000),
+      downtimeHourRow(DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, 10000000),
+      downtimeHourRow(day2, 5000000)
+    ],
+    forecast: [{
+      hourlyForecast: [
+        { start: DOWNTIME_DAY_TS, end: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, decision: 'not_mine' },
+        { start: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, end: DOWNTIME_DAY_TS + 2 * DOWNTIME_HOUR_MS, decision: 'mine' },
+        { start: day2, end: day2 + DOWNTIME_HOUR_MS, decision: 'mine' }
+      ]
+    }]
+  })
+
+  const result = await getDowntime(mockCtx, {
+    query: { start: DOWNTIME_DAY_TS, end: day2 + DOWNTIME_HOUR_MS, interval: '1d' }
+  })
+
+  t.is(result.log.length, 2, 'two daily buckets')
+  t.is(result.log[0].ts, DOWNTIME_DAY_TS, 'first day ts')
+  t.alike(result.log[0].timeRange,
+    { startTs: DOWNTIME_DAY_TS, endTs: day2 - 1 },
+    'day-spanning time range')
+  t.is(result.log[0].powerW, 7500000, 'daily power is the mean of the hourly power')
+  t.is(result.log[0].downtimeRate, 0.25, 'mean of 0.5 and 0 hourly downtime')
+  t.is(result.log[0].curtailmentRate, 0.25, 'curtailed-hour shortfall averaged over covered hours')
+  t.is(result.log[0].operationalIssuesRate, 0, 'no op issues on day one')
+  t.is(result.log[1].downtimeRate, 0.5, 'second day from its single covered hour')
+  t.is(result.log[1].operationalIssuesRate, 0.5, 'mine-hour shortfall is op issues')
+  t.is(result.summary.avgDowntimeRate, 0.375, 'summary averages the daily buckets')
+  t.pass()
+})
+
+test('indexForecastDecisionsByHour - availability zero curtails even a mine decision', (t) => {
+  const cases = [
+    { start: DOWNTIME_DAY_TS, decision: 'mine', available: 0 },
+    { start: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, decision: 'mine', available: '0' },
+    { start: DOWNTIME_DAY_TS + 2 * DOWNTIME_HOUR_MS, decision: 'mine', availableEnergy: false }
+  ]
+  const byHour = indexForecastDecisionsByHour([[{ hourlyForecast: cases }]])
+
+  t.is(byHour.get(DOWNTIME_DAY_TS), true, 'numeric 0 availability curtails')
+  t.is(byHour.get(DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS), true, 'string "0" availability curtails')
+  t.is(byHour.get(DOWNTIME_DAY_TS + 2 * DOWNTIME_HOUR_MS), true, 'availableEnergy false curtails')
+  t.pass()
+})
+
+test('indexForecastDecisionsByHour - manual mine override wins over a not_mine decision', (t) => {
+  const byHour = indexForecastDecisionsByHour([[{
+    hourlyForecast: [
+      { start: DOWNTIME_DAY_TS, decision: 'not_mine', manualOverrideMine: true },
+      { start: DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS, decision: 'not_mine', available: 1 }
+    ]
+  }]])
+
+  t.is(byHour.get(DOWNTIME_DAY_TS), false, 'override forces the hour to count as mining')
+  t.is(byHour.get(DOWNTIME_DAY_TS + DOWNTIME_HOUR_MS), true, 'without override not_mine curtails')
+  t.pass()
+})
+
+test('indexForecastDecisionsByHour - ignores malformed payloads and entries', (t) => {
+  const byHour = indexForecastDecisionsByHour([
+    null,
+    'bogus',
+    [null, { hourlyForecast: 'nope' }, { hourlyForecast: [{ decision: 'mine' }, { start: 'NaN', decision: 'mine' }] }]
+  ])
+
+  t.is(byHour.size, 0, 'nothing indexed from malformed input')
+  t.pass()
+})
+
+test('calculateDowntimeSummary - averages skip null-rate entries', (t) => {
+  const summary = calculateDowntimeSummary([
+    { powerW: 6000000, downtimeRate: 0.4, curtailmentRate: 0.4, operationalIssuesRate: 0 },
+    { powerW: 8000000, downtimeRate: null, curtailmentRate: null, operationalIssuesRate: null }
+  ], 10000000, true)
+
+  t.is(summary.avgDowntimeRate, 0.4, 'null rates excluded from the mean')
+  t.is(summary.avgCurtailmentRate, 0.4, 'null rates excluded from the mean')
+  t.is(summary.avgPowerW, 7000000, 'power averaged over all entries')
+  t.is(summary.minPowerW, 6000000, 'min power')
+  t.is(summary.maxPowerW, 8000000, 'max power')
+  t.is(summary.nominalPowerW, 10000000, 'nominal passed through')
+  t.is(summary.hasForecastData, true, 'forecast flag passed through')
+  t.pass()
+})
+
+test('buildHourlyDowntime + aggregateDowntimeDaily - numeric ts entries fall back to no timeRange', (t) => {
+  const hourly = buildHourlyDowntime(
+    [{ ts: DOWNTIME_DAY_TS, site_power_w: 5000000 }],
+    10000000,
+    new Map()
+  )
+
+  t.is(hourly[0].ts, DOWNTIME_DAY_TS, 'numeric ts parsed')
+  t.absent('timeRange' in hourly[0], 'no timeRange for a numeric source ts')
+  t.is(hourly[0].downtimeRate, 0.5, 'rate still computed')
+
+  const daily = aggregateDowntimeDaily(hourly)
+  t.is(daily.length, 1, 'single day')
+  t.alike(daily[0].timeRange,
+    { startTs: DOWNTIME_DAY_TS, endTs: DOWNTIME_DAY_TS + 24 * DOWNTIME_HOUR_MS - 1 },
+    'daily bucket always carries a timeRange')
+  t.pass()
 })

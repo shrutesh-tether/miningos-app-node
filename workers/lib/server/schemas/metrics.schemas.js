@@ -141,6 +141,16 @@ const schemas = {
       },
       required: ['start', 'end']
     },
+    downtime: {
+      type: 'object',
+      properties: {
+        start: { type: 'integer', minimum: 0 },
+        end: { type: 'integer', minimum: 0 },
+        interval: { type: 'string', enum: ['1h', '1d'] },
+        overwriteCache: { type: 'boolean' }
+      },
+      required: ['start', 'end']
+    },
     containerTelemetry: {
       type: 'object',
       properties: {

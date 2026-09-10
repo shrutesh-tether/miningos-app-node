@@ -97,7 +97,8 @@ function aggregatePoolStats (poolDataResults) {
 function extractGlobalConfig (globalConfigResults) {
   const config = {
     nominalHashrate: 0,
-    nominalPowerAvailability_MW: 0
+    nominalPowerAvailability_MW: 0,
+    nominalAvailablePowerMWh: 0
   }
 
   for (const orkResult of globalConfigResults) {
@@ -106,6 +107,9 @@ function extractGlobalConfig (globalConfigResults) {
     if (orkResult.nominalPowerAvailability_MW) {
       config.nominalPowerAvailability_MW =
         orkResult.nominalPowerAvailability_MW
+    }
+    if (orkResult.nominalAvailablePowerMWh) {
+      config.nominalAvailablePowerMWh = orkResult.nominalAvailablePowerMWh
     }
   }
 

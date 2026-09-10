@@ -15,7 +15,8 @@ const {
   COOLING_METRICS_AGGR_FIELDS,
   SPARE_PART_TYPES,
   sparePartTag,
-  SITE_STATUS_LIVE_WINDOW_MS
+  SITE_STATUS_LIVE_WINDOW_MS,
+  ELECTRICITY_EXT_DATA_KEYS
 } = require('../../constants')
 const {
   getStartOfDay,
@@ -42,6 +43,8 @@ const {
 } = require('../../metrics.utils')
 const { parseRacks } = require('../lib/queryUtils')
 const { resolvePoolHashrateForBuckets } = require('./pools.handlers')
+const { extractGlobalConfig } = require('./site.utils')
+const { normalizeAvailability } = require('../lib/export/types/forecast.export')
 
 function firstOrkEntries (res) {
   return Array.isArray(res?.[0]) ? res[0] : []
@@ -1895,6 +1898,159 @@ function calculateCoolingSummary (log) {
   }
 }
 
+const HOUR_MS = 60 * 60 * 1000
+
+// Maps each forecast hour to whether the site was intentionally curtailed.
+// manualOverrideMine forces mining regardless of the stored decision, and an
+// unavailable-energy hour counts as curtailed even if the decision was 'mine'.
+function indexForecastDecisionsByHour (forecastResults) {
+  const byHour = new Map()
+  for (const orkResult of Array.isArray(forecastResults) ? forecastResults : []) {
+    for (const payload of Array.isArray(orkResult) ? orkResult : []) {
+      if (!Array.isArray(payload?.hourlyForecast)) continue
+      for (const item of payload.hourlyForecast) {
+        const start = Number(item?.start)
+        if (!Number.isFinite(start)) continue
+        const hourTs = Math.floor(start / HOUR_MS) * HOUR_MS
+        const curtailed = item.manualOverrideMine === true
+          ? false
+          : normalizeAvailability(item) === 0 || item.decision === 'not_mine'
+        byHour.set(hourTs, curtailed)
+      }
+    }
+  }
+  return byHour
+}
+
+// Hours without a forecast entry count as 'mine', so an unexplained shortfall
+// surfaces as an operational issue rather than being hidden as curtailment.
+function buildHourlyDowntime (entries, nominalPowerW, decisionByHour) {
+  return entries.map(val => {
+    const ts = parseEntryTs(val.ts)
+    const timeRange = parseEntryTimeRange(val.ts)
+    const powerW = Number(val[AGGR_FIELDS.SITE_POWER]) || 0
+
+    let downtimeRate = null
+    let curtailmentRate = null
+    let operationalIssuesRate = null
+    if (nominalPowerW) {
+      downtimeRate = Math.max(0, nominalPowerW - powerW) / nominalPowerW
+      const hourTs = Math.floor(ts / HOUR_MS) * HOUR_MS
+      const curtailed = decisionByHour.get(hourTs) === true
+      curtailmentRate = curtailed ? downtimeRate : 0
+      operationalIssuesRate = curtailed ? 0 : downtimeRate
+    }
+
+    return {
+      ts,
+      ...(timeRange && { timeRange }),
+      powerW,
+      nominalPowerW,
+      downtimeRate,
+      curtailmentRate,
+      operationalIssuesRate
+    }
+  })
+}
+
+// Daily rates are the mean of the hourly rates over hours that have data, so
+// gaps in the stat log don't read as 100% downtime.
+function aggregateDowntimeDaily (hourlyLog) {
+  const byDay = new Map()
+  for (const entry of hourlyLog) {
+    const dayTs = getStartOfDay(entry.ts)
+    if (!byDay.has(dayTs)) byDay.set(dayTs, [])
+    byDay.get(dayTs).push(entry)
+  }
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([dayTs, hours]) => ({
+      ts: dayTs,
+      timeRange: { startTs: dayTs, endTs: dayTs + METRICS_TIME.ONE_DAY_MS - 1 },
+      powerW: hours.reduce((sum, h) => sum + h.powerW, 0) / hours.length,
+      nominalPowerW: hours[0].nominalPowerW,
+      downtimeRate: meanOfField(hours, 'downtimeRate'),
+      curtailmentRate: meanOfField(hours, 'curtailmentRate'),
+      operationalIssuesRate: meanOfField(hours, 'operationalIssuesRate')
+    }))
+}
+
+function meanOfField (entries, field) {
+  const values = entries
+    .map(entry => entry[field])
+    .filter(value => value !== null && value !== undefined)
+  return values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null
+}
+
+function calculateDowntimeSummary (log, nominalPowerW, hasForecastData) {
+  const powers = log.map(entry => entry.powerW)
+  return {
+    avgDowntimeRate: meanOfField(log, 'downtimeRate'),
+    avgCurtailmentRate: meanOfField(log, 'curtailmentRate'),
+    avgOperationalIssuesRate: meanOfField(log, 'operationalIssuesRate'),
+    avgPowerW: meanOfField(log, 'powerW'),
+    minPowerW: powers.length ? Math.min(...powers) : null,
+    maxPowerW: powers.length ? Math.max(...powers) : null,
+    nominalPowerW,
+    hasForecastData
+  }
+}
+
+async function getDowntime (ctx, req) {
+  const { start, end } = validateStartEnd(req)
+  const interval = req.query.interval ||
+    ((end - start) <= METRICS_TIME.TWO_DAYS_MS ? '1h' : '1d')
+
+  // Attribution is decided per forecast hour, so power is always fetched at
+  // hourly resolution and rolled up to days afterwards when interval=1d.
+  const { key, groupRange } = getIntervalConfig('1h')
+
+  const requestParams = isCentralDCSEnabled(ctx)
+    ? { type: WORKER_TYPES.DCS, tag: getDCSTag(ctx) }
+    : { type: WORKER_TYPES.POWERMETER, tag: WORKER_TAGS.POWERMETER }
+
+  const [powerRes, forecastRes, globalConfigRes] = await Promise.all([
+    ctx.dataProxy.requestData(RPC_METHODS.TAIL_LOG, {
+      ...requestParams,
+      key,
+      groupRange,
+      shouldCalculateAvg: true,
+      start,
+      end,
+      fields: { [LOG_FIELDS.SITE_POWER]: 1 },
+      aggrFields: { [AGGR_FIELDS.SITE_POWER]: 1 }
+    }),
+    // A site without an electricity worker still gets a downtime report; every
+    // shortfall is then attributed to operational issues.
+    ctx.dataProxy.requestDataMap(RPC_METHODS.GET_WRK_EXT_DATA, {
+      type: WORKER_TYPES.ELECTRICITY,
+      query: { key: ELECTRICITY_EXT_DATA_KEYS.FORECAST_HISTORY },
+      start,
+      end
+    }).catch(() => []),
+    ctx.dataProxy.requestDataMap(RPC_METHODS.GLOBAL_CONFIG, {
+      fields: { nominalPowerAvailability_MW: 1, nominalAvailablePowerMWh: 1 }
+    })
+  ])
+
+  // Some deployments store the site capacity as nominalAvailablePowerMWh
+  // (MWh available per hour, i.e. MW) instead of nominalPowerAvailability_MW.
+  const globalConfig = extractGlobalConfig(globalConfigRes)
+  const nominalMW = globalConfig.nominalPowerAvailability_MW ||
+    globalConfig.nominalAvailablePowerMWh
+  const nominalPowerW = nominalMW > 0 ? nominalMW * 1000000 : null
+
+  const decisionByHour = indexForecastDecisionsByHour(forecastRes)
+  const hourly = buildHourlyDowntime(firstOrkEntries(powerRes), nominalPowerW, decisionByHour)
+  const log = interval === '1d' ? aggregateDowntimeDaily(hourly) : hourly
+  const summary = calculateDowntimeSummary(log, nominalPowerW, decisionByHour.size > 0)
+
+  return { log, summary }
+}
+
 module.exports = {
   ...require('../../metrics.utils'),
   getHashrate,
@@ -1940,5 +2096,10 @@ module.exports = {
   processContainerHistoryData,
   getCooling,
   processCoolingData,
-  calculateCoolingSummary
+  calculateCoolingSummary,
+  getDowntime,
+  indexForecastDecisionsByHour,
+  buildHourlyDowntime,
+  aggregateDowntimeDaily,
+  calculateDowntimeSummary
 }

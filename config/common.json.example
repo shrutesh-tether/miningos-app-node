@@ -24,6 +24,7 @@
     "/auth/metrics/miner-status": "8s",
     "/auth/metrics/containers/:id": "8s",
     "/auth/metrics/cooling": "8s",
+    "/auth/metrics/downtime": "1m",
     "/auth/actions": "10s",
     "/auth/actions/batch": "10s",
     "/auth/actions/:type/:id": "10s",

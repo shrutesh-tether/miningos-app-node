@@ -195,6 +195,7 @@ const ENDPOINTS = {
   METRICS_POWER_MODE_TIMELINE: '/auth/metrics/power-mode/timeline',
   METRICS_TEMPERATURE: '/auth/metrics/temperature',
   METRICS_COOLING: '/auth/metrics/cooling',
+  METRICS_DOWNTIME: '/auth/metrics/downtime',
   METRICS_CONTAINER_TELEMETRY: '/auth/metrics/containers/:id',
   METRICS_CONTAINER_HISTORY: '/auth/metrics/containers/:id/history',
 
@@ -369,7 +370,7 @@ const COOLING_METRICS_AGGR_FIELDS = {
   pumps_running: 1
 }
 
-const SEVERITY_LEVELS = new Set(['critical', 'high', 'medium', 'low'])
+const SEVERITY_LEVELS = new Set(['critical', 'high', 'medium', 'low', 'warning'])
 
 // Rank for severity-aware sorting; higher = more severe, unknown severities rank lowest.
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 }

@@ -143,4 +143,4 @@ const historicalForecast = buildForecastEntry({
   }
 })
 
-module.exports = { forecastOverview, historicalForecast }
+module.exports = { forecastOverview, historicalForecast, normalizeAvailability }
