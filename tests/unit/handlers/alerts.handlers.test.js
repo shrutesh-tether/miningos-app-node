@@ -653,6 +653,19 @@ test('buildSeveritySummary - empty alerts', (t) => {
   t.is(result.critical, 0, 'critical should be 0')
 })
 
+test('buildSeveritySummary - counts warning severity', (t) => {
+  const alerts = [
+    { severity: 'critical' },
+    { severity: 'warning' },
+    { severity: 'warning' }
+  ]
+
+  const result = buildSeveritySummary(alerts)
+  t.is(result.warning, 2, 'should count warning')
+  t.is(result.critical, 1, 'should count critical')
+  t.is(result.total, 3, 'should count total')
+})
+
 // ==================== deduplicateAlerts Tests ====================
 
 test('deduplicateAlerts - removes duplicates by uuid', (t) => {
@@ -1452,6 +1465,17 @@ test('buildSiteAlertsSummary - alert without type falls under operational', (t) 
   t.is(result.miner.total, 0, 'miner bucket untouched')
 })
 
+test('buildSiteAlertsSummary - counts warning severity per bucket', (t) => {
+  const alerts = [
+    { type: 'site', severity: 'warning' },
+    { type: 'miner', severity: 'warning' }
+  ]
+
+  const result = buildSiteAlertsSummary(alerts)
+  t.is(result.operational.warning, 1, 'warning counted under operational')
+  t.is(result.miner.warning, 1, 'warning counted under miner')
+})
+
 // ==================== summary over the full set (ignores filter/search/type) ====================
 
 test('getSiteAlerts - summary ignores filter, search and type params', async (t) => {
@@ -1536,6 +1560,8 @@ test('getSiteAlerts - creates critical and warning alerts when site efficiency e
   t.is(bySeverity.critical.type, 'site', 'site-level alert has no device type')
   t.is(bySeverity.critical.description, 'High Site Efficiency detected', 'description is the short, fixed copy')
   t.is(bySeverity.critical.message, 'Site efficiency 100000.00 W/TH/s (max 50000 W/TH/s)', 'message reports efficiency to 2 decimal places')
+  t.is(result.summary.operational.warning, 1, 'warning tier is counted in the summary')
+  t.is(result.summary.operational.critical, 1, 'critical tier is counted in the summary')
 })
 
 test('getSiteAlerts - formats a fractional efficiency to 2 decimal places in the message', async (t) => {
