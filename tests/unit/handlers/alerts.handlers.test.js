@@ -10,6 +10,7 @@ const {
   restrictToNotesOnly,
   getThresholdFields,
   assertEnabledParamsAreSet,
+  dropUnknownAlertKeys,
   extractAlertsFromThings,
   matchesSearch,
   applySort,
@@ -126,6 +127,38 @@ test('setAlertParams - skips unknown alert keys when grouping by rack type', asy
   await new Promise((resolve) => setImmediate(resolve))
 
   t.alike(captured[0].params, { byRackType: {} }, 'unknown alert key contributes nothing to byRackType')
+})
+
+test('setAlertParams - does not persist unknown alert keys to globalDataLib', async (t) => {
+  let capturedData
+  const mockCtx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }] },
+    net_r0: { jRequest: async () => ({ ok: true }) },
+    authLib: { tokenHasPerms: async () => true },
+    globalDataLib: {
+      setGlobalData: async (data, type) => {
+        capturedData = data
+        return { data, type }
+      }
+    }
+  })
+
+  const mockReq = {
+    _info: { authToken: 'token' },
+    body: {
+      data: {
+        'custom.totally_made_up.warning': { enabled: true, notes: 'sneaky' },
+        'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+      }
+    }
+  }
+
+  const result = await setAlertParams(mockCtx, mockReq)
+
+  t.alike(capturedData, {
+    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+  }, 'unknown alert key is dropped before reaching globalDataLib.setGlobalData')
+  t.alike(result.data, capturedData, 'returned result reflects the filtered data')
 })
 
 test('setAlertParams - fans a single alert key out to all of its rack types', async (t) => {
@@ -426,6 +459,34 @@ test('assertEnabledParamsAreSet - notes is never treated as a threshold', async 
 
 test('assertEnabledParamsAreSet - unknown alert key has no known thresholds, so it can always be enabled', async (t) => {
   await t.execution(() => assertEnabledParamsAreSet({ 'custom.unknown_alert': { enabled: true } }))
+})
+
+test('assertEnabledParamsAreSet - truthy non-boolean enabled is still gated (matches worker\'s truthy check)', async (t) => {
+  await t.exception(
+    () => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: 1 } }),
+    /ERR_ALERT_PARAMS_REQUIRED/,
+    'enabled: 1 must not bypass the threshold requirement'
+  )
+  await t.execution(
+    () => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: 1, minHashRateMhs: 50 } }),
+    'enabled: 1 is fine once the threshold is actually set'
+  )
+})
+
+test('dropUnknownAlertKeys - keeps only keys present in CUSTOM_ALERT_CONFIG', (t) => {
+  const result = dropUnknownAlertKeys({
+    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 },
+    'custom.totally_made_up.warning': { enabled: true },
+    not_even_an_alert_key: 'x'
+  })
+
+  t.alike(result, {
+    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+  }, 'unknown keys are dropped, known keys pass through unchanged')
+})
+
+test('dropUnknownAlertKeys - empty input stays empty', (t) => {
+  t.alike(dropUnknownAlertKeys({}), {})
 })
 
 test('restrictToNotesOnly - drops every submitted field except notes', (t) => {

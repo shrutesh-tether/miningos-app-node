@@ -328,6 +328,16 @@ function assertEnabledParamsAreSet (data) {
   }
 }
 
+// setGlobalData persists `data` verbatim, so an unknown/made-up key would otherwise
+// be stored and echoed back from GET as if it were real alert config.
+function dropUnknownAlertKeys (data) {
+  const known = {}
+  for (const alertKey in data) {
+    if (CUSTOM_ALERT_CONFIG[alertKey]) known[alertKey] = data[alertKey]
+  }
+  return known
+}
+
 async function setAlertParams (ctx, req) {
   const type = GLOBAL_DATA_TYPES.ALERT_PARAMETERS
 
@@ -339,6 +349,8 @@ async function setAlertParams (ctx, req) {
     const [existingConfig] = await ctx.globalDataLib.getGlobalData({ type })
     data = restrictToNotesOnly(data, existingConfig)
   }
+
+  data = dropUnknownAlertKeys(data)
 
   assertEnabledParamsAreSet(data)
 
@@ -422,6 +434,7 @@ module.exports = {
   restrictToNotesOnly,
   getThresholdFields,
   assertEnabledParamsAreSet,
+  dropUnknownAlertKeys,
   extractAlertsFromThings,
   matchesSearch,
   applySort,
