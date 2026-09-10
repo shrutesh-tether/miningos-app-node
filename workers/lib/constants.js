@@ -1138,34 +1138,6 @@ const CUSTOM_ALERT_CONFIG = {
   ...dcsPerSensorAlertConfig(DCS_DIFFERENTIAL_PRESSURE_SENSOR_TAGS, 'high_differential_pressure', ['maxPressureBar']),
   ...dcsPerSensorAlertConfig(DCS_LOW_TANK_LEVEL_SENSOR_TAGS, 'low_tank_level', ['minLevelPct']),
 
-  'custom.vibration.warning': {
-    configSchema: {
-      enabled: {
-        type: 'boolean'
-      },
-      notes: {
-        type: 'string'
-      },
-      onError: {
-        type: 'boolean'
-      }
-    },
-    rackTypes: ['dcs']
-  },
-  'custom.vibration.critical': {
-    configSchema: {
-      enabled: {
-        type: 'boolean'
-      },
-      notes: {
-        type: 'string'
-      },
-      onError: {
-        type: 'boolean'
-      }
-    },
-    rackTypes: ['dcs']
-  },
   'custom.high_site_efficiency.warning': {
     configSchema: {
       enabled: {

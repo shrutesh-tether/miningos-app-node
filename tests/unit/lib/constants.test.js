@@ -74,8 +74,7 @@ test('constants - CUSTOM_ALERT_CONFIG', (t) => {
 
 test('constants - CUSTOM_ALERT_CONFIG dcs sensor alerts', (t) => {
   const dcsSensorFields = {
-    'custom.vibration.warning': ['onError'],
-    'custom.vibration.critical': ['onError']
+    'custom.tower_vibration.critical': ['onError']
   }
 
   for (const [key, fields] of Object.entries(dcsSensorFields)) {
@@ -110,17 +109,23 @@ test('constants - CUSTOM_ALERT_CONFIG group-wide temperature/flow/speed/fancoil_
   t.pass()
 })
 
-test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/level were split into per-sensor entries; high_supply_temp/pressure were dropped', (t) => {
+test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/level were split into per-sensor entries; high_supply_temp/pressure/vibration were dropped', (t) => {
   const removedKeys = [
     'custom.high_supply_temp.warning', 'custom.high_supply_temp.critical',
     'custom.high_differential_pressure.warning', 'custom.high_differential_pressure.critical',
     'custom.low_tank_level.warning', 'custom.low_tank_level.critical',
     'custom.level.warning', 'custom.level.critical',
-    'custom.pressure.warning', 'custom.pressure.critical'
+    'custom.pressure.warning', 'custom.pressure.critical',
+    'custom.vibration.warning', 'custom.vibration.critical'
   ]
   for (const key of removedKeys) {
     t.absent(CUSTOM_ALERT_CONFIG[key], `${key} should no longer exist`)
   }
+
+  // custom.vibration.* was dropped outright: it was functionally identical to
+  // custom.tower_vibration.critical (same vibration_switches group, same
+  // onError gate, same configSchema) — nothing else replaces it.
+  t.ok(CUSTOM_ALERT_CONFIG['custom.tower_vibration.critical'], 'custom.tower_vibration.critical remains the sole vibration-switch alert')
 
   // custom.high_supply_temp.* covered TT-7501/TT-7502 sensors, which already
   // have their own custom.temperature.<tag>.* entries — no replacement needed.
