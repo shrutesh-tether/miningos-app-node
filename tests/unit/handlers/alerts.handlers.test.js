@@ -725,7 +725,7 @@ test('getSiteAlerts - happy path', async (t) => {
   t.is(result.summary.miner.high, 1, 'should count 1 high under miner')
   t.is(result.summary.miner.low, 1, 'should count 1 low under miner')
   t.is(result.summary.miner.total, 3, 'miner total covers all alerts')
-  t.alike(result.summary.operational, { critical: 0, high: 0, medium: 0, low: 0, total: 0 }, 'operational bucket present and empty')
+  t.alike(result.summary.operational, { critical: 0, high: 0, medium: 0, low: 0, warning: 0, total: 0 }, 'operational bucket present and empty')
 })
 
 test('getSiteAlerts - empty results', async (t) => {
@@ -740,8 +740,8 @@ test('getSiteAlerts - empty results', async (t) => {
   t.is(result.total, 0, 'should have 0 total')
   t.is(result.alerts.length, 0, 'should have empty alerts')
   t.alike(result.summary, {
-    operational: { critical: 0, high: 0, medium: 0, low: 0, total: 0 },
-    miner: { critical: 0, high: 0, medium: 0, low: 0, total: 0 }
+    operational: { critical: 0, high: 0, medium: 0, low: 0, warning: 0, total: 0 },
+    miner: { critical: 0, high: 0, medium: 0, low: 0, warning: 0, total: 0 }
   }, 'both summary buckets present and zeroed')
 })
 
@@ -1442,8 +1442,8 @@ test('buildSiteAlertsSummary - splits miner family from operational', (t) => {
   ]
 
   const result = buildSiteAlertsSummary(alerts)
-  t.alike(result.miner, { critical: 1, high: 1, medium: 0, low: 0, total: 2 }, 'miner + subtype counted under miner')
-  t.alike(result.operational, { critical: 1, high: 0, medium: 1, low: 1, total: 3 }, 'non-miner types counted under operational')
+  t.alike(result.miner, { critical: 1, high: 1, medium: 0, low: 0, warning: 0, total: 2 }, 'miner + subtype counted under miner')
+  t.alike(result.operational, { critical: 1, high: 0, medium: 1, low: 1, warning: 0, total: 3 }, 'non-miner types counted under operational')
 })
 
 test('buildSiteAlertsSummary - alert without type falls under operational', (t) => {
@@ -1456,8 +1456,8 @@ test('buildSiteAlertsSummary - alert without type falls under operational', (t) 
 
 test('getSiteAlerts - summary ignores filter, search and type params', async (t) => {
   const fullSummary = {
-    operational: { critical: 1, high: 0, medium: 1, low: 0, total: 2 },
-    miner: { critical: 0, high: 1, medium: 0, low: 1, total: 2 }
+    operational: { critical: 1, high: 0, medium: 1, low: 0, warning: 0, total: 2 },
+    miner: { critical: 0, high: 1, medium: 0, low: 1, warning: 0, total: 2 }
   }
   const queries = [
     {},

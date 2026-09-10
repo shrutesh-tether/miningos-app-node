@@ -369,7 +369,7 @@ const COOLING_METRICS_AGGR_FIELDS = {
   pumps_running: 1
 }
 
-const SEVERITY_LEVELS = new Set(['critical', 'high', 'medium', 'low'])
+const SEVERITY_LEVELS = new Set(['critical', 'high', 'medium', 'low', 'warning'])
 
 // Rank for severity-aware sorting; higher = more severe, unknown severities rank lowest.
 const SEVERITY_RANK = { critical: 4, high: 3, medium: 2, low: 1 }
