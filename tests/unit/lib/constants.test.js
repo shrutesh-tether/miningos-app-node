@@ -74,8 +74,6 @@ test('constants - CUSTOM_ALERT_CONFIG', (t) => {
 
 test('constants - CUSTOM_ALERT_CONFIG dcs sensor alerts', (t) => {
   const dcsSensorFields = {
-    'custom.pressure.warning': ['maxPressureBar'],
-    'custom.pressure.critical': ['maxPressureBar'],
     'custom.vibration.warning': ['onError'],
     'custom.vibration.critical': ['onError']
   }
@@ -112,12 +110,13 @@ test('constants - CUSTOM_ALERT_CONFIG group-wide temperature/flow/speed/fancoil_
   t.pass()
 })
 
-test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/level were split into per-sensor entries; high_supply_temp was dropped', (t) => {
+test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/level were split into per-sensor entries; high_supply_temp/pressure were dropped', (t) => {
   const removedKeys = [
     'custom.high_supply_temp.warning', 'custom.high_supply_temp.critical',
     'custom.high_differential_pressure.warning', 'custom.high_differential_pressure.critical',
     'custom.low_tank_level.warning', 'custom.low_tank_level.critical',
-    'custom.level.warning', 'custom.level.critical'
+    'custom.level.warning', 'custom.level.critical',
+    'custom.pressure.warning', 'custom.pressure.critical'
   ]
   for (const key of removedKeys) {
     t.absent(CUSTOM_ALERT_CONFIG[key], `${key} should no longer exist`)
@@ -126,6 +125,8 @@ test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/
   // custom.high_supply_temp.* covered TT-7501/TT-7502 sensors, which already
   // have their own custom.temperature.<tag>.* entries — no replacement needed.
   t.ok(CUSTOM_ALERT_CONFIG['custom.temperature.TT-7501-A.warning'], 'TT-7501-A already has its own temperature entry')
+
+  t.ok(CUSTOM_ALERT_CONFIG['custom.high_differential_pressure.PT-7501-A.warning'], 'PT-7501-A already has its own differential-pressure entry')
 
   // custom.high_differential_pressure.* split into one entry per PT sensor.
   t.ok(CUSTOM_ALERT_CONFIG['custom.high_differential_pressure.PT-7501-A.warning'], 'per-sensor high_differential_pressure entry should exist')

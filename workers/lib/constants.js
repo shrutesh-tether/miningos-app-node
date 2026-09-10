@@ -1131,34 +1131,6 @@ const CUSTOM_ALERT_CONFIG = {
     },
     rackTypes: ['dcs']
   },
-  'custom.pressure.warning': {
-    configSchema: {
-      enabled: {
-        type: 'boolean'
-      },
-      notes: {
-        type: 'string'
-      },
-      maxPressureBar: {
-        type: 'number'
-      }
-    },
-    rackTypes: ['dcs']
-  },
-  'custom.pressure.critical': {
-    configSchema: {
-      enabled: {
-        type: 'boolean'
-      },
-      notes: {
-        type: 'string'
-      },
-      maxPressureBar: {
-        type: 'number'
-      }
-    },
-    rackTypes: ['dcs']
-  },
   ...dcsPerSensorAlertConfig(DCS_TEMPERATURE_SENSOR_TAGS, 'temperature', ['maxTempC']),
   ...dcsPerSensorAlertConfig(DCS_FLOW_SENSOR_TAGS, 'flow', ['minFlowM3h', 'maxFlowM3h']),
   ...dcsPerSensorAlertConfig(DCS_SPEED_SENSOR_TAGS, 'speed', ['minSpeedHz', 'maxSpeedHz']),
