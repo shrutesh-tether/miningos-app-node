@@ -74,7 +74,8 @@ test('constants - CUSTOM_ALERT_CONFIG', (t) => {
 
 test('constants - CUSTOM_ALERT_CONFIG dcs sensor alerts', (t) => {
   const dcsSensorFields = {
-    'custom.tower_vibration.critical': ['onError']
+    'custom.tower_vibration.VS-7581.critical': ['onError'],
+    'custom.tower_vibration.VS-7591.critical': ['onError']
   }
 
   for (const [key, fields] of Object.entries(dcsSensorFields)) {
@@ -116,16 +117,15 @@ test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/
     'custom.low_tank_level.warning', 'custom.low_tank_level.critical',
     'custom.level.warning', 'custom.level.critical',
     'custom.pressure.warning', 'custom.pressure.critical',
-    'custom.vibration.warning', 'custom.vibration.critical'
+    'custom.vibration.warning', 'custom.vibration.critical',
+    'custom.tower_vibration.critical'
   ]
   for (const key of removedKeys) {
     t.absent(CUSTOM_ALERT_CONFIG[key], `${key} should no longer exist`)
   }
 
-  // custom.vibration.* was dropped outright: it was functionally identical to
-  // custom.tower_vibration.critical (same vibration_switches group, same
-  // onError gate, same configSchema) — nothing else replaces it.
-  t.ok(CUSTOM_ALERT_CONFIG['custom.tower_vibration.critical'], 'custom.tower_vibration.critical remains the sole vibration-switch alert')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.tower_vibration.VS-7581.critical'], 'per-sensor tower_vibration entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.tower_vibration.VS-7591.critical'], 'per-sensor tower_vibration entry should exist')
 
   // custom.high_supply_temp.* covered TT-7501/TT-7502 sensors, which already
   // have their own custom.temperature.<tag>.* entries — no replacement needed.

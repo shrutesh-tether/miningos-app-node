@@ -148,7 +148,7 @@ test('setAlertParams - fans a single alert key out to all of its rack types', as
   const mockReq = {
     _info: { authToken: 'token' },
     body: {
-      data: { 'custom.tower_vibration.critical': { enabled: true, onError: true } }
+      data: { 'custom.tower_vibration.VS-7581.critical': { enabled: true, onError: true } }
     }
   }
 
@@ -157,7 +157,7 @@ test('setAlertParams - fans a single alert key out to all of its rack types', as
 
   t.alike(captured[0], {
     byRackType: {
-      dcs: { 'custom.tower_vibration.critical': { enabled: true, onError: true } }
+      dcs: { 'custom.tower_vibration.VS-7581.critical': { enabled: true, onError: true } }
     }
   })
 })

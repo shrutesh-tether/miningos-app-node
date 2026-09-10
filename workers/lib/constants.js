@@ -1031,6 +1031,26 @@ const DCS_SPEED_SENSOR_TAGS = ['B-7501', 'B-7502', 'B-7505', 'B-7506', 'B-7509',
 const DCS_FANCOIL_SENSOR_TAGS = ['FC-7513', 'FC-7514', 'FC-7515', 'FC-7516', 'FC-7529', 'FC-7530', 'FC-7531', 'FC-7532', 'FC-7534', 'FC-7536']
 const DCS_DIFFERENTIAL_PRESSURE_SENSOR_TAGS = ['PT-7501-A', 'PT-7501-B', 'PT-7501-C', 'PT-7501-D', 'PT-7501-E', 'PT-7501-F', 'PT-7501-G', 'PT-7501-H', 'PT-7502-A', 'PT-7502-B', 'PT-7502-C', 'PT-7502-D', 'PT-7502-E', 'PT-7502-F', 'PT-7502-G', 'PT-7502-H']
 const DCS_LOW_TANK_LEVEL_SENSOR_TAGS = ['LT-7501', 'LT-7581', 'LT-7591', 'TQ-7502']
+const DCS_VIBRATION_SENSOR_TAGS = ['VS-7581', 'VS-7591']
+
+// Per-sensor counterpart of dcsPerSensorAlertConfig for custom.tower_vibration.*:
+// critical-only (no warning tier) and an `onError` boolean gate instead of
+// numeric threshold fields, matching miningos-wrk-dcs-siemens/workers/lib/alerts.js
+// perSensorVibrationSpecs.
+const dcsPerSensorVibrationAlertConfig = (tags) => {
+  const entries = {}
+  for (const tag of tags) {
+    entries[`custom.tower_vibration.${tag}.critical`] = {
+      configSchema: {
+        enabled: { type: 'boolean' },
+        notes: { type: 'string' },
+        onError: { type: 'boolean' }
+      },
+      rackTypes: ['dcs']
+    }
+  }
+  return entries
+}
 
 const CUSTOM_ALERT_CONFIG = {
   'custom.low_hashrate.warning': {
@@ -1117,26 +1137,13 @@ const CUSTOM_ALERT_CONFIG = {
     },
     rackTypes: ['dcs']
   },
-  'custom.tower_vibration.critical': {
-    configSchema: {
-      enabled: {
-        type: 'boolean'
-      },
-      notes: {
-        type: 'string'
-      },
-      onError: {
-        type: 'boolean'
-      }
-    },
-    rackTypes: ['dcs']
-  },
   ...dcsPerSensorAlertConfig(DCS_TEMPERATURE_SENSOR_TAGS, 'temperature', ['maxTempC']),
   ...dcsPerSensorAlertConfig(DCS_FLOW_SENSOR_TAGS, 'flow', ['minFlowM3h', 'maxFlowM3h']),
   ...dcsPerSensorAlertConfig(DCS_SPEED_SENSOR_TAGS, 'speed', ['minSpeedHz', 'maxSpeedHz']),
   ...dcsPerSensorAlertConfig(DCS_FANCOIL_SENSOR_TAGS, 'fancoil_temperature', ['minTempC', 'maxTempC']),
   ...dcsPerSensorAlertConfig(DCS_DIFFERENTIAL_PRESSURE_SENSOR_TAGS, 'high_differential_pressure', ['maxPressureBar']),
   ...dcsPerSensorAlertConfig(DCS_LOW_TANK_LEVEL_SENSOR_TAGS, 'low_tank_level', ['minLevelPct']),
+  ...dcsPerSensorVibrationAlertConfig(DCS_VIBRATION_SENSOR_TAGS),
 
   'custom.high_site_efficiency.warning': {
     configSchema: {
