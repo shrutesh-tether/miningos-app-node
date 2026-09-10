@@ -74,18 +74,8 @@ test('constants - CUSTOM_ALERT_CONFIG', (t) => {
 
 test('constants - CUSTOM_ALERT_CONFIG dcs sensor alerts', (t) => {
   const dcsSensorFields = {
-    'custom.temperature.warning': ['maxTempC'],
-    'custom.temperature.critical': ['maxTempC'],
     'custom.pressure.warning': ['maxPressureBar'],
     'custom.pressure.critical': ['maxPressureBar'],
-    'custom.flow.warning': ['minFlowM3h'],
-    'custom.flow.critical': ['minFlowM3h'],
-    'custom.level.warning': ['minLevelPct'],
-    'custom.level.critical': ['minLevelPct'],
-    'custom.speed.warning': ['minSpeedHz', 'maxSpeedHz'],
-    'custom.speed.critical': ['minSpeedHz', 'maxSpeedHz'],
-    'custom.fancoil_temperature.warning': ['minTempC', 'maxTempC'],
-    'custom.fancoil_temperature.critical': ['minTempC', 'maxTempC'],
     'custom.vibration.warning': ['onError'],
     'custom.vibration.critical': ['onError']
   }
@@ -97,6 +87,56 @@ test('constants - CUSTOM_ALERT_CONFIG dcs sensor alerts', (t) => {
     for (const field of fields) {
       t.ok(conf.configSchema[field], `${key} configSchema should declare ${field}`)
     }
+  }
+
+  t.pass()
+})
+
+test('constants - CUSTOM_ALERT_CONFIG group-wide temperature/flow/speed/fancoil_temperature alerts were replaced by per-sensor ones', (t) => {
+  const removedKeys = [
+    'custom.temperature.warning', 'custom.temperature.critical',
+    'custom.flow.warning', 'custom.flow.critical',
+    'custom.speed.warning', 'custom.speed.critical',
+    'custom.fancoil_temperature.warning', 'custom.fancoil_temperature.critical'
+  ]
+  for (const key of removedKeys) {
+    t.absent(CUSTOM_ALERT_CONFIG[key], `${key} should no longer exist`)
+  }
+
+  // Replaced by per-sensor entries, e.g.:
+  t.ok(CUSTOM_ALERT_CONFIG['custom.temperature.TT-7501-A.warning'], 'per-sensor temperature entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.flow.FT-7501.warning'], 'per-sensor flow entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.speed.B-7501.warning'], 'per-sensor speed entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.fancoil_temperature.FC-7513.warning'], 'per-sensor fancoil_temperature entry should exist')
+
+  t.pass()
+})
+
+test('constants - CUSTOM_ALERT_CONFIG high_differential_pressure/low_tank_level/level were split into per-sensor entries; high_supply_temp was dropped', (t) => {
+  const removedKeys = [
+    'custom.high_supply_temp.warning', 'custom.high_supply_temp.critical',
+    'custom.high_differential_pressure.warning', 'custom.high_differential_pressure.critical',
+    'custom.low_tank_level.warning', 'custom.low_tank_level.critical',
+    'custom.level.warning', 'custom.level.critical'
+  ]
+  for (const key of removedKeys) {
+    t.absent(CUSTOM_ALERT_CONFIG[key], `${key} should no longer exist`)
+  }
+
+  // custom.high_supply_temp.* covered TT-7501/TT-7502 sensors, which already
+  // have their own custom.temperature.<tag>.* entries — no replacement needed.
+  t.ok(CUSTOM_ALERT_CONFIG['custom.temperature.TT-7501-A.warning'], 'TT-7501-A already has its own temperature entry')
+
+  // custom.high_differential_pressure.* split into one entry per PT sensor.
+  t.ok(CUSTOM_ALERT_CONFIG['custom.high_differential_pressure.PT-7501-A.warning'], 'per-sensor high_differential_pressure entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.high_differential_pressure.PT-7502-H.critical'], 'per-sensor high_differential_pressure entry should exist')
+
+  // custom.low_tank_level.* was renamed to embed its sensor tag, then expanded
+  // from just LT-7501 to every levels-group sensor once custom.level.* (its
+  // only remaining source of coverage for LT-7581/LT-7591/TQ-7502) was removed.
+  for (const tag of ['LT-7501', 'LT-7581', 'LT-7591', 'TQ-7502']) {
+    t.ok(CUSTOM_ALERT_CONFIG[`custom.low_tank_level.${tag}.warning`], `per-sensor low_tank_level entry should exist for ${tag}`)
+    t.ok(CUSTOM_ALERT_CONFIG[`custom.low_tank_level.${tag}.critical`], `per-sensor low_tank_level entry should exist for ${tag}`)
   }
 
   t.pass()
