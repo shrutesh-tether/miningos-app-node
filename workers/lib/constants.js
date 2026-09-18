@@ -1071,7 +1071,7 @@ const CUSTOM_ALERT_CONFIG = {
       notes: {
         type: 'string'
       },
-      minHashRateMhs: {
+      lowHashrate: {
         type: 'number'
       }
     },
@@ -1085,7 +1085,7 @@ const CUSTOM_ALERT_CONFIG = {
       notes: {
         type: 'string'
       },
-      minHashRateMhs: {
+      lowHashrate: {
         type: 'number'
       }
     },
@@ -1246,6 +1246,34 @@ const CUSTOM_ALERT_CONFIG = {
         type: 'string'
       },
       lowPower: {
+        type: 'number'
+      }
+    },
+    rackTypes: ['miner']
+  },
+  'custom.high_power.warning': {
+    configSchema: {
+      enabled: {
+        type: 'boolean'
+      },
+      notes: {
+        type: 'string'
+      },
+      highPower: {
+        type: 'number'
+      }
+    },
+    rackTypes: ['miner']
+  },
+  'custom.high_power.critical': {
+    configSchema: {
+      enabled: {
+        type: 'boolean'
+      },
+      notes: {
+        type: 'string'
+      },
+      highPower: {
         type: 'number'
       }
     },

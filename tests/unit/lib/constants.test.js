@@ -153,8 +153,12 @@ test('constants - CUSTOM_ALERT_CONFIG miner alerts', (t) => {
   const minerFields = {
     'custom.chip_temp.warning': ['lowTemp', 'normalTemp', 'highTemp'],
     'custom.chip_temp.critical': ['lowTemp', 'normalTemp', 'highTemp'],
+    'custom.low_hashrate.warning': ['lowHashrate'],
+    'custom.low_hashrate.critical': ['lowHashrate'],
     'custom.low_power.warning': ['lowPower'],
     'custom.low_power.critical': ['lowPower'],
+    'custom.high_power.warning': ['highPower'],
+    'custom.high_power.critical': ['highPower'],
     'custom.high_efficiency.warning': ['highEfficiency'],
     'custom.high_efficiency.critical': ['highEfficiency'],
     'custom.wrong_miner_pool.warning': [],

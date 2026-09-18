@@ -43,7 +43,7 @@ test('getAlertParams - reads params from globalDataLib by type', async (t) => {
     globalDataLib: {
       getGlobalData: async (req) => {
         capturedReq = req
-        return { 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 } }
+        return { 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 } }
       }
     }
   }
@@ -51,7 +51,7 @@ test('getAlertParams - reads params from globalDataLib by type', async (t) => {
   const result = await getAlertParams(mockCtx)
 
   t.is(capturedReq.type, GLOBAL_DATA_TYPES.ALERT_PARAMETERS, 'should query the alertParameters global data type')
-  t.alike(result, { 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 } })
+  t.alike(result, { 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 } })
 })
 
 test('setAlertParams - persists to globalDataLib and notifies orks grouped by rack type', async (t) => {
@@ -77,7 +77,7 @@ test('setAlertParams - persists to globalDataLib and notifies orks grouped by ra
     _info: { authToken: 'token' },
     body: {
       data: {
-        'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 },
+        'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 },
         'custom.high_differential_pressure.PT-7501-A.critical': { enabled: true, maxPressureBar: 3 }
       }
     }
@@ -94,7 +94,7 @@ test('setAlertParams - persists to globalDataLib and notifies orks grouped by ra
   t.is(captured[0].method, 'setAlertParams', 'should call setAlertParams on the ork')
   t.alike(captured[0].params, {
     byRackType: {
-      miner: { 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 } },
+      miner: { 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 } },
       dcs: { 'custom.high_differential_pressure.PT-7501-A.critical': { enabled: true, maxPressureBar: 3 } }
     }
   }, 'should group params by each alert key\'s rackTypes')
@@ -282,7 +282,7 @@ test('setAlertParams - respects the submitted enabled flag', async (t) => {
     body: {
       data: {
         // UI says disabled, threshold is fully configured -> stays disabled
-        'custom.low_hashrate.warning': { enabled: false, minHashRateMhs: 50 },
+        'custom.low_hashrate.warning': { enabled: false, lowHashrate: 50 },
         // UI says disabled, no configurable threshold at all -> stays disabled
         'custom.wrong_miner_pool.warning': { enabled: false, notes: 'pool mismatch' }
       }
@@ -292,7 +292,7 @@ test('setAlertParams - respects the submitted enabled flag', async (t) => {
   const result = await setAlertParams(mockCtx, mockReq)
 
   t.alike(result.data, {
-    'custom.low_hashrate.warning': { enabled: false, minHashRateMhs: 50 },
+    'custom.low_hashrate.warning': { enabled: false, lowHashrate: 50 },
     'custom.wrong_miner_pool.warning': { enabled: false, notes: 'pool mismatch' }
   }, 'submitted enabled value is kept as-is')
 
@@ -301,7 +301,7 @@ test('setAlertParams - respects the submitted enabled flag', async (t) => {
   t.alike(captured[0], {
     byRackType: {
       miner: {
-        'custom.low_hashrate.warning': { enabled: false, minHashRateMhs: 50 },
+        'custom.low_hashrate.warning': { enabled: false, lowHashrate: 50 },
         'custom.wrong_miner_pool.warning': { enabled: false, notes: 'pool mismatch' }
       }
     }
@@ -380,7 +380,7 @@ test('setAlertParams - restricts users without alert_config_sensitive:w to updat
     },
     globalDataLib: {
       getGlobalData: async () => ([{
-        'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'old notes' },
+        'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'old notes' },
         'custom.high_differential_pressure.PT-7501-A.critical': { enabled: false, maxPressureBar: 3, notes: 'other' }
       }]),
       setGlobalData: async (data, type) => ({ data, type })
@@ -391,7 +391,7 @@ test('setAlertParams - restricts users without alert_config_sensitive:w to updat
     _info: { authToken: 'token' },
     body: {
       data: {
-        'custom.low_hashrate.warning': { enabled: false, minHashRateMhs: 999, notes: 'new notes' }
+        'custom.low_hashrate.warning': { enabled: false, lowHashrate: 999, notes: 'new notes' }
       }
     }
   }
@@ -402,14 +402,14 @@ test('setAlertParams - restricts users without alert_config_sensitive:w to updat
   t.alike(capturedPerms.perms, ['alert_config_sensitive:w'], 'should check the sensitive alert config permission')
 
   t.alike(result.data, {
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'new notes' }
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'new notes' }
   }, 'should keep existing fields and only apply the submitted notes')
 
   await new Promise((resolve) => setImmediate(resolve))
 
   t.alike(captured[0], {
     byRackType: {
-      miner: { 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'new notes' } }
+      miner: { 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'new notes' } }
     }
   }, 'should notify orks with the notes-only merged config')
 })
@@ -421,7 +421,7 @@ test('getThresholdFields - alert with no configurable threshold has none', (t) =
 })
 
 test('getThresholdFields - excludes enabled/notes, keeps the real threshold fields', (t) => {
-  t.alike(getThresholdFields('custom.low_hashrate.warning'), ['minHashRateMhs'])
+  t.alike(getThresholdFields('custom.low_hashrate.warning'), ['lowHashrate'])
   t.alike(getThresholdFields('custom.speed.B-7501.critical'), ['minSpeedHz', 'maxSpeedHz'])
 })
 
@@ -438,12 +438,12 @@ test('assertEnabledParamsAreSet - disabled alerts are never checked, even with m
 })
 
 test('assertEnabledParamsAreSet - single-threshold alert requires its threshold to enable', async (t) => {
-  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 } }))
-  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 0 } }), 'threshold of 0 still counts as set')
+  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 } }))
+  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 0 } }), 'threshold of 0 still counts as set')
 
   await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true } }), /ERR_ALERT_PARAMS_REQUIRED/)
-  await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: undefined } }), /ERR_ALERT_PARAMS_REQUIRED/)
-  await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: null } }), /ERR_ALERT_PARAMS_REQUIRED/)
+  await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, lowHashrate: undefined } }), /ERR_ALERT_PARAMS_REQUIRED/)
+  await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, lowHashrate: null } }), /ERR_ALERT_PARAMS_REQUIRED/)
 })
 
 test('assertEnabledParamsAreSet - multi-threshold alert requires every threshold field to enable', async (t) => {
@@ -454,7 +454,7 @@ test('assertEnabledParamsAreSet - multi-threshold alert requires every threshold
 
 test('assertEnabledParamsAreSet - notes is never treated as a threshold', async (t) => {
   await t.exception(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, notes: 'some notes' } }), /ERR_ALERT_PARAMS_REQUIRED/)
-  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'some notes' } }))
+  await t.execution(() => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'some notes' } }))
 })
 
 test('assertEnabledParamsAreSet - unknown alert key has no known thresholds, so it can always be enabled', async (t) => {
@@ -490,18 +490,18 @@ test('dropUnknownAlertKeys - empty input stays empty', (t) => {
 
 test('restrictToNotesOnly - drops every submitted field except notes', (t) => {
   const submittedData = {
-    'custom.low_hashrate.warning': { enabled: false, minHashRateMhs: 999, notes: 'new notes' },
+    'custom.low_hashrate.warning': { enabled: false, lowHashrate: 999, notes: 'new notes' },
     // no matching entry in existingConfig for this key
     'custom.unknown_alert': { enabled: true, threshold: 123, notes: 'unknown notes' }
   }
   const existingConfig = {
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'old notes' }
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'old notes' }
   }
 
   const result = restrictToNotesOnly(submittedData, existingConfig)
 
   t.alike(result, {
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50, notes: 'new notes' },
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50, notes: 'new notes' },
     'custom.unknown_alert': { notes: 'unknown notes' }
   }, 'submitted enabled/threshold values are ignored; only notes carries through, existing fields win everywhere else')
 })
