@@ -538,6 +538,34 @@ test('getPoolThingConfig - container thing returns overriddenConfig count', asyn
   t.pass()
 })
 
+test('getPoolThingConfig - counts overridden miners beyond the single-page limit', async (t) => {
+  const TOTAL_MINERS = 150
+  const mockCtx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }] },
+    net_r0: {
+      jRequest: async (key, method, params) => {
+        if (method !== RPC_METHODS.LIST_THINGS) return []
+        if (params?.query?.id) {
+          return [{ id: 'container-1', rack: 'container-unit-a', info: { container: 'unit-a', poolConfig: 'shared-cfg' } }]
+        }
+        if (params?.query?.tags) {
+          const offset = params.offset || 0
+          const remaining = TOTAL_MINERS - offset
+          const pageSize = Math.max(0, Math.min(params.limit, remaining))
+          return Array.from({ length: pageSize }, (_, i) => ({ id: `m${offset + i}`, info: { poolConfig: 'other-cfg' } }))
+        }
+        return []
+      }
+    }
+  })
+
+  const mockReq = { params: { id: 'container-1' } }
+  const result = await getPoolThingConfig(mockCtx, mockReq)
+
+  t.is(result.overriddenConfig, TOTAL_MINERS, 'should count all overridden miners, not capped at a single page')
+  t.pass()
+})
+
 test('getPoolThingConfig - container with no poolConfig returns null and zero overriden', async (t) => {
   const mockCtx = withDataProxy({
     conf: { orks: [{ rpcPublicKey: 'key1' }] },
@@ -598,6 +626,34 @@ test('getPoolStatsContainers - returns container stats with overriddenConfig', a
   t.ok(unitB, 'should have unit-b')
   t.is(unitA.overriddenConfig, 1, 'unit-a should have 1 miner with overridden config')
   t.is(unitB.overriddenConfig, 0, 'unit-b should have 0 overridden')
+  t.pass()
+})
+
+test('getPoolStatsContainers - counts overridden miners beyond the single-page limit', async (t) => {
+  const TOTAL_MINERS = 150
+  const mockCtx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }] },
+    net_r0: {
+      jRequest: async (key, method, params) => {
+        if (method !== 'listThings') return []
+        if (params?.query?.tags?.$in?.includes('t-container')) {
+          return [{ info: { container: 'unit-a', poolConfig: 'shared-cfg' } }]
+        }
+        if (params?.query?.['info.container']?.$in) {
+          const offset = params.offset || 0
+          const remaining = TOTAL_MINERS - offset
+          const pageSize = Math.max(0, Math.min(params.limit, remaining))
+          return Array.from({ length: pageSize }, (_, i) => ({ info: { container: 'unit-a', poolConfig: 'other-cfg' } }))
+        }
+        return []
+      }
+    }
+  })
+
+  const result = await getPoolStatsContainers(mockCtx, {})
+
+  t.is(result.length, 1, 'should return one entry')
+  t.is(result[0].overriddenConfig, TOTAL_MINERS, 'should count all overridden miners, not capped at a single page')
   t.pass()
 })
 

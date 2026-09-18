@@ -10,7 +10,8 @@ const {
 } = require('../../constants')
 const {
   parseJsonQueryParam,
-  getStartOfDay
+  getStartOfDay,
+  flattenRpcResults
 } = require('../../utils')
 
 async function getPools (ctx, req) {
@@ -299,29 +300,31 @@ const getPoolThingConfig = async (ctx, req) => {
     return { poolConfig: info?.poolConfig || null, overriddenConfig: 0 }
   }
 
-  const miners = await ctx.dataProxy.requestData(RPC_METHODS.LIST_THINGS, {
+  const miners = await ctx.dataProxy.requestDataAllPages(RPC_METHODS.LIST_THINGS, {
     query: { tags: { $in: [`container-${info.container}`] } },
     fields: { 'info.poolConfig': 1 }
   })
-  const overriddenConfig = miners?.[0]?.filter(m => m.info?.poolConfig && m.info?.poolConfig !== info?.poolConfig)?.length || 0
+  const overriddenConfig = flattenRpcResults(miners).filter(m => m.info?.poolConfig && m.info?.poolConfig !== info?.poolConfig).length
   return { poolConfig: info?.poolConfig || null, overriddenConfig }
 }
 
 const getPoolStatsContainers = async (ctx, req) => {
   const fields = { [MINER_FIELD_MAP.container]: 1, [MINER_FIELD_MAP.poolConfig]: 1 }
-  const containers = await ctx.dataProxy.requestData(RPC_METHODS.LIST_THINGS, {
+  const containers = await ctx.dataProxy.requestDataAllPages(RPC_METHODS.LIST_THINGS, {
     fields, query: { tags: { $in: ['t-container'] } }
   })
-  const containerIds = containers?.[0]?.filter(m => m.info?.poolConfig).map(m => m.info.container)
-  const miners = await ctx.dataProxy.requestData(RPC_METHODS.LIST_THINGS, {
+  const flatContainers = flattenRpcResults(containers)
+  const containerIds = flatContainers.filter(m => m.info?.poolConfig).map(m => m.info.container)
+  const miners = await ctx.dataProxy.requestDataAllPages(RPC_METHODS.LIST_THINGS, {
     fields, query: { [MINER_FIELD_MAP.container]: { $in: containerIds } }
   })
+  const flatMiners = flattenRpcResults(miners)
 
-  return containers?.[0]?.map(data => {
+  return flatContainers.map(data => {
     if (!data.info?.poolConfig) return { container: data.info.container, overriddenConfig: 0 }
     return {
       container: data.info.container,
-      overriddenConfig: miners?.[0]?.filter(m => m.info?.poolConfig && m.info?.container === data.info?.container && m.info?.poolConfig !== data.info?.poolConfig)?.length || 0
+      overriddenConfig: flatMiners.filter(m => m.info?.poolConfig && m.info?.container === data.info?.container && m.info?.poolConfig !== data.info?.poolConfig).length
     }
   })
 }

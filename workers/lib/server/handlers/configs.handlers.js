@@ -1,6 +1,7 @@
 'use strict'
 
 const { CONFIG_TYPES, RPC_METHODS, WORKER_TYPES } = require('../../constants')
+const { flattenRpcResults } = require('../../utils')
 const { assertSafeMongoQuery } = require('../lib/queryUtils')
 
 const VALID_CONFIG_TYPES = Object.values(CONFIG_TYPES)
@@ -48,13 +49,14 @@ async function getConfigs (ctx, req) {
 
 const fetchPoolConfigThings = async (ctx, configs) => {
   const ids = configs.map(c => c.id)
-  const things = await ctx.dataProxy.requestData(RPC_METHODS.LIST_THINGS, {
+  const things = await ctx.dataProxy.requestDataAllPages(RPC_METHODS.LIST_THINGS, {
     query: { 'info.poolConfig': { $in: ids } },
     fields: { 'info.poolConfig': 1 }
   })
+  const flat = flattenRpcResults(things)
   return configs.map(config => {
-    const containers = things?.[0]?.filter(t => t.info?.poolConfig === config.id && t.rack.startsWith(WORKER_TYPES.CONTAINER))?.length || 0
-    const miners = things?.[0]?.filter(t => t.info?.poolConfig === config.id && t.rack.startsWith(WORKER_TYPES.MINER))?.length || 0
+    const containers = flat.filter(t => t.info?.poolConfig === config.id && t.rack.startsWith(WORKER_TYPES.CONTAINER)).length
+    const miners = flat.filter(t => t.info?.poolConfig === config.id && t.rack.startsWith(WORKER_TYPES.MINER)).length
     return { ...config, containers, miners }
   })
 }
