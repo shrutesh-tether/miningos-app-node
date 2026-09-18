@@ -148,7 +148,7 @@ test('setAlertParams - does not persist unknown alert keys to globalDataLib', as
     body: {
       data: {
         'custom.totally_made_up.warning': { enabled: true, notes: 'sneaky' },
-        'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+        'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 }
       }
     }
   }
@@ -156,7 +156,7 @@ test('setAlertParams - does not persist unknown alert keys to globalDataLib', as
   const result = await setAlertParams(mockCtx, mockReq)
 
   t.alike(capturedData, {
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 }
   }, 'unknown alert key is dropped before reaching globalDataLib.setGlobalData')
   t.alike(result.data, capturedData, 'returned result reflects the filtered data')
 })
@@ -467,20 +467,20 @@ test('assertEnabledParamsAreSet - only boolean true is gated', async (t) => {
     'enabled: 1 is not treated as enabled, so missing thresholds are ignored'
   )
   await t.execution(
-    () => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: 1, minHashRateMhs: 50 } }),
+    () => assertEnabledParamsAreSet({ 'custom.low_hashrate.warning': { enabled: 1, lowHashrate: 50 } }),
     'enabled: 1 is fine even with a threshold set'
   )
 })
 
 test('dropUnknownAlertKeys - keeps only keys present in CUSTOM_ALERT_CONFIG', (t) => {
   const result = dropUnknownAlertKeys({
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 },
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 },
     'custom.totally_made_up.warning': { enabled: true },
     not_even_an_alert_key: 'x'
   })
 
   t.alike(result, {
-    'custom.low_hashrate.warning': { enabled: true, minHashRateMhs: 50 }
+    'custom.low_hashrate.warning': { enabled: true, lowHashrate: 50 }
   }, 'unknown keys are dropped, known keys pass through unchanged')
 })
 
