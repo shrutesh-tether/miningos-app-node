@@ -214,7 +214,7 @@ test('setAlertParams - fans out a multi-field dcs alert added for configurable s
   const mockReq = {
     _info: { authToken: 'token' },
     body: {
-      data: { 'custom.speed.B-7501.critical': { enabled: true, minSpeedHz: 10, maxSpeedHz: 60 } }
+      data: { 'custom.pump_current.B-7501.critical': { enabled: true, minCurrentA: 10, maxCurrentA: 60 } }
     }
   }
 
@@ -223,7 +223,7 @@ test('setAlertParams - fans out a multi-field dcs alert added for configurable s
 
   t.alike(captured[0], {
     byRackType: {
-      dcs: { 'custom.speed.B-7501.critical': { enabled: true, minSpeedHz: 10, maxSpeedHz: 60 } }
+      dcs: { 'custom.pump_current.B-7501.critical': { enabled: true, minCurrentA: 10, maxCurrentA: 60 } }
     }
   }, 'should group the new dcs sensor alert under dcs')
 })
@@ -344,12 +344,12 @@ test('setAlertParams - throws when enabling a multi-threshold alert with only on
     }
   })
 
-  // custom.speed.B-7501.critical has two threshold fields: minSpeedHz and maxSpeedHz
+  // custom.pump_current.B-7501.critical has two threshold fields: minCurrentA and maxCurrentA
   const mockReq = {
     _info: { authToken: 'token' },
     body: {
       data: {
-        'custom.speed.B-7501.critical': { enabled: true, minSpeedHz: 10 } // maxSpeedHz missing
+        'custom.pump_current.B-7501.critical': { enabled: true, minCurrentA: 10 } // maxCurrentA missing
       }
     }
   }
@@ -421,8 +421,8 @@ test('getThresholdFields - alert with no configurable threshold has none', (t) =
 })
 
 test('getThresholdFields - excludes enabled/notes, keeps the real threshold fields', (t) => {
-  t.alike(getThresholdFields('custom.low_hashrate.warning'), ['minHashRateMhs'])
-  t.alike(getThresholdFields('custom.speed.B-7501.critical'), ['minSpeedHz', 'maxSpeedHz'])
+  t.alike(getThresholdFields('custom.low_hashrate.warning'), ['lowHashrate'])
+  t.alike(getThresholdFields('custom.pump_current.B-7501.critical'), ['minCurrentA', 'maxCurrentA'])
 })
 
 test('getThresholdFields - unknown alert key has no known thresholds', (t) => {
@@ -447,9 +447,9 @@ test('assertEnabledParamsAreSet - single-threshold alert requires its threshold 
 })
 
 test('assertEnabledParamsAreSet - multi-threshold alert requires every threshold field to enable', async (t) => {
-  await t.execution(() => assertEnabledParamsAreSet({ 'custom.speed.B-7501.critical': { enabled: true, minSpeedHz: 10, maxSpeedHz: 60 } }))
-  await t.exception(() => assertEnabledParamsAreSet({ 'custom.speed.B-7501.critical': { enabled: true, minSpeedHz: 10 } }), /ERR_ALERT_PARAMS_REQUIRED/)
-  await t.exception(() => assertEnabledParamsAreSet({ 'custom.speed.B-7501.critical': { enabled: true } }), /ERR_ALERT_PARAMS_REQUIRED/)
+  await t.execution(() => assertEnabledParamsAreSet({ 'custom.pump_current.B-7501.critical': { enabled: true, minCurrentA: 10, maxCurrentA: 60 } }))
+  await t.exception(() => assertEnabledParamsAreSet({ 'custom.pump_current.B-7501.critical': { enabled: true, minCurrentA: 10 } }), /ERR_ALERT_PARAMS_REQUIRED/)
+  await t.exception(() => assertEnabledParamsAreSet({ 'custom.pump_current.B-7501.critical': { enabled: true } }), /ERR_ALERT_PARAMS_REQUIRED/)
 })
 
 test('assertEnabledParamsAreSet - notes is never treated as a threshold', async (t) => {

@@ -1037,7 +1037,8 @@ const dcsPerSensorAlertConfig = (tags, category, numberFields) => {
 
 const DCS_TEMPERATURE_SENSOR_TAGS = ['TT-7501-A', 'TT-7501-B', 'TT-7502-A', 'TT-7502-B', 'TT-7581-A', 'TT-7581-B', 'TT-7591-A', 'TT-7591-B', 'TT-7591-C', 'TT-7591-D']
 const DCS_FLOW_SENSOR_TAGS = ['FT-7501', 'FT-7502']
-const DCS_SPEED_SENSOR_TAGS = ['B-7501', 'B-7502', 'B-7505', 'B-7506', 'B-7509', 'B-7511', 'B-7512', 'B-7513', 'B-7514', 'B-7515', 'B-7516', 'B-7517', 'B-7518', 'V-7501', 'V-7502']
+const DCS_SPEED_SENSOR_TAGS = ['V-7501', 'V-7502']
+const DCS_PUMP_CURRENT_SENSOR_TAGS = ['B-7501', 'B-7502', 'B-7505', 'B-7506', 'B-7509', 'B-7511', 'B-7512', 'B-7513', 'B-7514', 'B-7515', 'B-7516', 'B-7517', 'B-7518']
 const DCS_FANCOIL_SENSOR_TAGS = ['FC-7513', 'FC-7514', 'FC-7515', 'FC-7516', 'FC-7529', 'FC-7530', 'FC-7531', 'FC-7532', 'FC-7534', 'FC-7536']
 const DCS_DIFFERENTIAL_PRESSURE_SENSOR_TAGS = ['PT-7501-A', 'PT-7501-B', 'PT-7501-C', 'PT-7501-D', 'PT-7501-E', 'PT-7501-F', 'PT-7501-G', 'PT-7501-H', 'PT-7502-A', 'PT-7502-B', 'PT-7502-C', 'PT-7502-D', 'PT-7502-E', 'PT-7502-F', 'PT-7502-G', 'PT-7502-H']
 const DCS_LOW_TANK_LEVEL_SENSOR_TAGS = ['LT-7501', 'LT-7581', 'LT-7591', 'TQ-7502']
@@ -1150,6 +1151,7 @@ const CUSTOM_ALERT_CONFIG = {
   ...dcsPerSensorAlertConfig(DCS_TEMPERATURE_SENSOR_TAGS, 'temperature', ['maxTempC']),
   ...dcsPerSensorAlertConfig(DCS_FLOW_SENSOR_TAGS, 'flow', ['minFlowM3h', 'maxFlowM3h']),
   ...dcsPerSensorAlertConfig(DCS_SPEED_SENSOR_TAGS, 'speed', ['minSpeedHz', 'maxSpeedHz']),
+  ...dcsPerSensorAlertConfig(DCS_PUMP_CURRENT_SENSOR_TAGS, 'pump_current', ['minCurrentA', 'maxCurrentA']),
   ...dcsPerSensorAlertConfig(DCS_FANCOIL_SENSOR_TAGS, 'fancoil_temperature', ['minTempC', 'maxTempC']),
   ...dcsPerSensorAlertConfig(DCS_DIFFERENTIAL_PRESSURE_SENSOR_TAGS, 'high_differential_pressure', ['maxPressureBar']),
   ...dcsPerSensorAlertConfig(DCS_LOW_TANK_LEVEL_SENSOR_TAGS, 'low_tank_level', ['minLevelPct']),

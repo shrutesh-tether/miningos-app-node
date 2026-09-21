@@ -105,7 +105,10 @@ test('constants - CUSTOM_ALERT_CONFIG group-wide temperature/flow/speed/fancoil_
   // Replaced by per-sensor entries, e.g.:
   t.ok(CUSTOM_ALERT_CONFIG['custom.temperature.TT-7501-A.warning'], 'per-sensor temperature entry should exist')
   t.ok(CUSTOM_ALERT_CONFIG['custom.flow.FT-7501.warning'], 'per-sensor flow entry should exist')
-  t.ok(CUSTOM_ALERT_CONFIG['custom.speed.B-7501.warning'], 'per-sensor speed entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.speed.V-7501.warning'], 'per-sensor speed entry should exist')
+  t.ok(CUSTOM_ALERT_CONFIG['custom.pump_current.B-7501.warning'], 'per-sensor pump_current entry should exist')
+  t.absent(CUSTOM_ALERT_CONFIG['custom.speed.B-7501.warning'], 'pumps no longer have a speed entry')
+  t.absent(CUSTOM_ALERT_CONFIG['custom.speed.B-7501.critical'], 'pumps no longer have a speed entry')
   t.ok(CUSTOM_ALERT_CONFIG['custom.fancoil_temperature.FC-7513.warning'], 'per-sensor fancoil_temperature entry should exist')
 
   t.pass()
