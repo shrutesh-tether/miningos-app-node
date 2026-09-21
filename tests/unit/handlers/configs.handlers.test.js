@@ -205,6 +205,39 @@ test('getConfigs - handles error results from orks', async (t) => {
   t.pass()
 })
 
+test('getConfigs - reports full miner count beyond the single-page limit', async (t) => {
+  const TOTAL_MINERS = 150
+  const mockCtx = createMockCtxWithOrks(
+    [{ rpcPublicKey: 'key1' }],
+    async (key, method, payload) => {
+      if (method === 'getConfigs') {
+        return [{ id: 'config1', name: 'Pool Config 1' }]
+      }
+      if (method === RPC_METHODS.LIST_THINGS) {
+        const offset = payload.offset || 0
+        const remaining = TOTAL_MINERS - offset
+        const pageSize = Math.max(0, Math.min(payload.limit, remaining))
+        return Array.from({ length: pageSize }, (_, i) => ({
+          id: `miner-${offset + i}`,
+          rack: 'miner-antminer-s19xp',
+          info: { poolConfig: 'config1' }
+        }))
+      }
+      return []
+    }
+  )
+
+  const mockReq = {
+    params: { type: 'pool' },
+    query: {}
+  }
+
+  const result = await getConfigs(mockCtx, mockReq)
+  t.is(result.length, 1, 'should have 1 config')
+  t.is(result[0].miners, TOTAL_MINERS, 'should report the full miner count, not capped at a single page')
+  t.pass()
+})
+
 test('getConfigs - aggregates results from multiple orks', async (t) => {
   let callCount = 0
   const mockCtx = createMockCtxWithOrks(

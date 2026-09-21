@@ -12,10 +12,15 @@ const woReq = (email = 'op@test') => ({
   _info: { authToken: 'tok', user: { metadata: { email } } }
 })
 
-function buildCtx ({ racks = [{ id: RACK_ID }], pushResult = { id: 'action-1', errors: [] }, captured } = {}) {
+function buildCtx ({
+  racks = [{ id: RACK_ID }],
+  pushResult = { id: 'action-1', errors: [] },
+  perms = ['inventory:rw', 'work_order:rw', 'actions:rw'],
+  captured
+} = {}) {
   return {
     authLib: {
-      getTokenPerms: async () => ({ permissions: ['inventory:rw', 'work_order:rw', 'actions:rw'] })
+      getTokenPerms: async () => ({ permissions: perms })
     },
     dataProxy: {
       requestData: async (method, payload, errorHandler) => {
@@ -80,18 +85,46 @@ test('submitWorkOrderAction - submits pushAction against the resolved WO rack', 
   t.alike(out, [{ id: 'action-1', errors: [] }])
 })
 
-test('submitWorkOrderAction - elevateRackWrite appends the target rack write perm', async (t) => {
+test('submitWorkOrderAction - elevateRackWrite appends the write perm for the target thing type', async (t) => {
   const captured = {}
   await submitWorkOrderAction(
     buildCtx({ captured }), woReq(), 'updateThing',
     { id: 'miner-1', info: { status: 'ok_repaired' } },
     'miner-wm-m63spp-shelf-1',
-    { elevateRackWrite: true }
+    { elevateRackWrite: 'miner-wm-m63spp' }
   )
   t.alike(
     captured.payload.authPerms,
     ['inventory:rw', 'work_order:rw', 'actions:rw', 'miner:rw'],
     'miner rack write perm appended so the ork does not drop the target rack'
+  )
+})
+
+test('submitWorkOrderAction - elevateRackWrite replaces a read-only entry for the same capability', async (t) => {
+  const captured = {}
+  await submitWorkOrderAction(
+    buildCtx({ captured, perms: ['miner:r', 'inventory:rw', 'work_order:rw'] }), woReq(), 'updateThing',
+    { id: 'miner-1', info: { status: 'ok_repaired' } },
+    'miner-wm-m63spp-shelf-1',
+    { elevateRackWrite: 'miner-wm-m63spp' }
+  )
+  t.alike(
+    captured.payload.authPerms,
+    ['inventory:rw', 'work_order:rw', 'miner:rw'],
+    'miner:r is replaced, not shadowing the elevated entry for first-match consumers'
+  )
+})
+
+test('submitWorkOrderAction - elevateRackWrite leaves perms alone for a type outside the permission names', async (t) => {
+  const captured = {}
+  await submitWorkOrderAction(
+    buildCtx({ captured }), woReq(), 'updateThing',
+    { id: 'x' }, 'sensor-rack-1', { elevateRackWrite: 'sensor-env' }
+  )
+  t.alike(
+    captured.payload.authPerms,
+    ['inventory:rw', 'work_order:rw', 'actions:rw'],
+    'unknown capability runs unelevated instead of minting a junk perm'
   )
 })
 
@@ -101,7 +134,7 @@ test('submitWorkOrderAction - elevateRackWrite does not duplicate a perm the cal
     buildCtx({ captured }), woReq(), 'updateThing',
     { id: 'part-1', info: { status: 'faulty' } },
     'inventory-miner_part-psu-shelf-1',
-    { elevateRackWrite: true }
+    { elevateRackWrite: 'inventory-miner_part-psu' }
   )
   t.alike(captured.payload.authPerms, ['inventory:rw', 'work_order:rw', 'actions:rw'])
 })

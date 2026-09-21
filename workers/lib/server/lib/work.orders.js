@@ -4,9 +4,12 @@ const { setTimeout: sleep } = require('timers/promises')
 const {
   WORK_ORDER_THING_TYPE,
   WORK_ORDER_ACTION_WAIT_ATTEMPTS,
-  WORK_ORDER_ACTION_WAIT_MS
+  WORK_ORDER_ACTION_WAIT_MS,
+  AUTH_PERMISSIONS
 } = require('../../constants')
 const { flattenRpcResults } = require('../../utils')
+
+const RACK_PERM_NAMES = new Set(Object.values(AUTH_PERMISSIONS))
 
 async function getWorkOrderRackId (ctx) {
   if (ctx._workOrderRackId) return ctx._workOrderRackId
@@ -27,12 +30,23 @@ async function submitWorkOrderAction (ctx, req, action, paramObj, rackId, opts =
   // caller's write permission per target rack and silently drops racks that
   // fail it. A repaired device's status write targets its own rack (e.g.
   // miner-*), which roles like repair_technician cannot write directly, so the
-  // push would end with ERR_ORK_ACTION_CALLS_EMPTY. Callers opt into acting
-  // with the target rack's write permission for these WO-scoped updates.
+  // push would end with ERR_ORK_ACTION_CALLS_EMPTY. Callers opt in by passing
+  // the target's thing type, from which the capability is derived the same way
+  // the ork derives it from the rack registry type (rack ids are free-form).
+  // A type outside the permission names leaves the perms untouched, so such
+  // racks run unelevated as before.
   let authPerms = permissions || []
   if (opts.elevateRackWrite) {
-    const rackPerm = `${String(rackId).split('-')[0]}:rw`
-    if (!authPerms.includes(rackPerm)) authPerms = [...authPerms, rackPerm]
+    const cap = String(opts.elevateRackWrite).split('-')[0]
+    if (RACK_PERM_NAMES.has(cap)) {
+      const rackPerm = `${cap}:rw`
+      if (!authPerms.includes(rackPerm)) {
+        // Keep one entry per capability so the elevated level cannot be
+        // shadowed for a first-match consumer; the ork's own matcher scans
+        // every entry, so this is defensive only.
+        authPerms = [...authPerms.filter(p => !p.startsWith(`${cap}:`)), rackPerm]
+      }
+    }
   }
 
   const results = await ctx.dataProxy.requestData('pushAction', {
@@ -67,8 +81,8 @@ async function _loadActions (ctx, ids) {
   })
 }
 
-async function assertActionsExecuted (ctx, req, errCode) {
-  const ids = req._woActionIds || []
+async function assertActionsExecuted (ctx, req, errCode, actionIds = null) {
+  const ids = actionIds || req._woActionIds || []
   if (!ids.length) return
 
   for (let attempt = 0; attempt < WORK_ORDER_ACTION_WAIT_ATTEMPTS; attempt++) {
