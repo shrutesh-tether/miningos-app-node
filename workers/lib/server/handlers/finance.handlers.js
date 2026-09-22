@@ -973,6 +973,8 @@ async function getRevenueSummary (ctx, req) {
   const log = []
   for (const dayTs of [...allDays].sort()) {
     const ts = Number(dayTs)
+    if (ts < start || ts > end) continue
+
     const revenue = dailyRevenue[dayTs] || {}
     const btcPrice = dailyPrices[dayTs] || currentBtcPrice || 0
     const block = dailyBlocks[dayTs] || {}
