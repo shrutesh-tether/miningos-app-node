@@ -1028,9 +1028,11 @@ async function getRevenueSummary (ctx, req) {
       ebitdaHodl: (revenueBTC * currentBtcPrice) - totalCostsUSD,
       btcProductionCost: safeDiv(totalCostsUSD, revenueBTC),
       energyRevenuePerMWh: safeDiv(revenueUSD, consumptionMWh),
+      netEnergyRevenuePerMWh: safeDiv(miningNetUSD, consumptionMWh),
       allInCostPerMWh: safeDiv(totalCostsUSD, consumptionMWh),
       hashRevenueBTCPerPHsPerDay: safeDiv(revenueBTC, hashratePhs),
       hashRevenueUSDPerPHsPerDay: safeDiv(revenueUSD, hashratePhs),
+      netHashRevenueUSDPerPHsPerDay: safeDiv(miningNetUSD, hashratePhs),
       blockReward: block.blockReward || 0,
       blockTotalFees: block.blockTotalFees || 0,
       blockSize: block.blockSize || 0,
@@ -1057,8 +1059,8 @@ async function getRevenueSummary (ctx, req) {
 
   const aggregated = aggregateByPeriod(log, period, [], {
     meanKeys: [
-      'btcPrice', 'powerW', 'hashrateMhs', 'energyRevenuePerMWh', 'allInCostPerMWh',
-      'hashRevenueBTCPerPHsPerDay', 'hashRevenueUSDPerPHsPerDay',
+      'btcPrice', 'powerW', 'hashrateMhs', 'energyRevenuePerMWh', 'netEnergyRevenuePerMWh', 'allInCostPerMWh',
+      'hashRevenueBTCPerPHsPerDay', 'hashRevenueUSDPerPHsPerDay', 'netHashRevenueUSDPerPHsPerDay',
       'curtailmentRate', 'operationalIssuesRate', 'powerUtilization', 'lcoeUsdPerMwh'
     ]
   })
@@ -1094,6 +1096,7 @@ function calculateDetailedRevenueSummary (log, currentBtcPrice) {
       totalConsumptionMWh: 0,
       avgCostPerMWh: null,
       avgRevenuePerMWh: null,
+      avgNetRevenuePerMWh: null,
       avgBtcPrice: null,
       avgCurtailmentRate: null,
       avgPowerUtilization: null,
@@ -1194,6 +1197,7 @@ function calculateDetailedRevenueSummary (log, currentBtcPrice) {
     totalConsumptionMWh: totals.consumptionMWh,
     avgCostPerMWh: safeDiv(totals.costsUSD, totals.consumptionMWh),
     avgRevenuePerMWh: safeDiv(totals.revenueUSD, totals.consumptionMWh),
+    avgNetRevenuePerMWh: safeDiv(totals.miningNetUSD, totals.consumptionMWh),
     avgBtcPrice: safeDiv(totals.btcPriceSum, totals.btcPriceCount),
     avgCurtailmentRate: safeDiv(totals.curtailmentRateSum, totals.curtailmentRateCount),
     avgPowerUtilization: safeDiv(totals.powerUtilizationSum, totals.powerUtilizationCount),

@@ -498,6 +498,7 @@ test('getRevenueSummary daily - a day with no hashrate sample is null, not zero'
   t.is(result.log[0].hashrateMhs, 100, 'the reported day keeps its value')
   t.is(result.log[1].hashrateMhs, null, 'the unreported day is null, not a zero-filled reading')
   t.is(result.log[1].hashRevenueUSDPerPHsPerDay, null, 'per-PH/s revenue is unknown too, not Infinity or 0')
+  t.is(result.log[1].netHashRevenueUSDPerPHsPerDay, null, 'net per-PH/s revenue is unknown too, not Infinity or 0')
 })
 
 test('getRevenueSummary monthly - a missing hashrate day does not drag the mean down', async (t) => {
@@ -1110,7 +1111,8 @@ test('calculateDetailedRevenueSummary - calculates from log entries', (t) => {
       ebitdaHodl: 15000,
       btcPrice: 40000,
       curtailmentRate: 0.1,
-      powerUtilization: 0.8
+      powerUtilization: 0.8,
+      miningNetUSD: 19000
     },
     {
       revenueBTC: 0.3,
@@ -1123,7 +1125,8 @@ test('calculateDetailedRevenueSummary - calculates from log entries', (t) => {
       ebitdaHodl: 9600,
       btcPrice: 42000,
       curtailmentRate: 0.15,
-      powerUtilization: 0.85
+      powerUtilization: 0.85,
+      miningNetUSD: 12000
     }
   ]
 
@@ -1134,8 +1137,10 @@ test('calculateDetailedRevenueSummary - calculates from log entries', (t) => {
   t.is(summary.totalCostsUSD, 8000, 'should sum costs')
   t.is(summary.totalConsumptionMWh, 160, 'should sum consumption')
   t.is(summary.totalEbitdaSelling, 24600, 'should sum selling EBITDA')
+  t.is(summary.totalMiningNetUSD, 31000, 'should sum net mining revenue')
   t.ok(summary.avgCostPerMWh !== null, 'should calculate avg cost per MWh')
   t.ok(summary.avgRevenuePerMWh !== null, 'should calculate avg revenue per MWh')
+  t.is(summary.avgNetRevenuePerMWh, 193.75, 'should calculate avg net revenue per MWh')
   t.ok(summary.avgBtcPrice !== null, 'should calculate avg BTC price')
   t.ok(summary.avgCurtailmentRate !== null, 'should calculate avg curtailment rate')
   t.ok(summary.avgPowerUtilization !== null, 'should calculate avg power utilization')
@@ -1149,6 +1154,7 @@ test('calculateDetailedRevenueSummary - handles empty log', (t) => {
   t.is(summary.totalRevenueUSD, 0, 'should be zero')
   t.is(summary.totalFeesBTC, 0, 'should be zero')
   t.is(summary.avgCostPerMWh, null, 'should be null')
+  t.is(summary.avgNetRevenuePerMWh, null, 'should be null')
   t.is(summary.currentBtcPrice, 42000, 'should include current price')
   t.pass()
 })
@@ -1998,7 +2004,7 @@ test('getRevenueSummary - folds forecast energy sales, pool rebates and net-of-t
     conf: { orks: [{ rpcPublicKey: 'key1' }] },
     net_r0: {
       jRequest: async (key, method, payload) => {
-        if (method === 'tailLog') return [{ ts: dayTs, site_power_w: 5000000 }]
+        if (method === 'tailLog') return [{ ts: dayTs, site_power_w: 5000000, hashrate_mhs_5m_sum_aggr: 1000000000 }]
         if (method !== 'getWrkExtData') return []
         switch (payload.query.key) {
           case 'transactions': return [{ transactions: [{ ts: dayTs, changed_balance: 1 }] }]
@@ -2034,6 +2040,12 @@ test('getRevenueSummary - folds forecast energy sales, pool rebates and net-of-t
   t.is(row.availableEnergyMWh, 0)
   t.is(row.miningNetUSD, 57360)
   t.is(row.netCashUSD, 57458)
+  t.is(row.energyRevenuePerMWh, 500, 'gross mining revenue per MWh ignores tax fees')
+  t.is(row.netEnergyRevenuePerMWh, 478, 'net mining revenue per MWh is net of tax fees')
+  t.is(row.hashRevenueUSDPerPHsPerDay, 60000, 'gross hash revenue per PH/s ignores tax fees')
+  t.is(row.netHashRevenueUSDPerPHsPerDay, 57360, 'net hash revenue per PH/s is net of tax fees')
   t.is(summary.totalRebateBTC, 0.5)
   t.is(summary.totalNetCashUSD, 57458)
+  t.is(summary.avgRevenuePerMWh, 500, 'gross avg revenue per MWh')
+  t.is(summary.avgNetRevenuePerMWh, 478, 'net avg revenue per MWh')
 })
