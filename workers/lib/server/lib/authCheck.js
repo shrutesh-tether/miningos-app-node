@@ -19,7 +19,12 @@ async function authCheck (ctx, req, rep, tokenFromQuery = null) {
 
   const ips = extractIps(req)
 
-  const cacheKey = `${token}:${ips.join(',')}`
+  // JSON-encode rather than join with a plain delimiter: token and ip values are
+  // attacker-controlled (Authorization header, X-Forwarded-For) and unvalidated, so a
+  // naive `${token}:${ips.join(',')}` lets two different (token, ips) pairs collide on
+  // the same string (e.g. token `a:b`, ips `[c]` vs token `a`, ips `[b:c]`), letting a
+  // crafted request hit another session's cached user.
+  const cacheKey = JSON.stringify([token, ips])
 
   const cached = ctx.lru_1m?.get(cacheKey)
   if (cached && (ctx.conf.ttl * 1000) > AUTH_CACHE_TTL) {

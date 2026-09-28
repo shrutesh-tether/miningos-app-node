@@ -213,6 +213,51 @@ test('authCheck - LRU evicts when max capacity reached', async (t) => {
   t.is(resolveTokenCalls, 3, 'token-a re-resolved after eviction proves LRU is bounded')
 })
 
+test('authCheck - unambiguous cache key: a token/ips pair that collided under plain-string concatenation must not hit another session\'s cache entry', async (t) => {
+  let resolveTokenCalls = 0
+  const mockCtx = {
+    noAuth: false,
+    conf: { ttl: 3600 },
+    lru_1m: new Map(),
+    authLib: {
+      resolveToken: async (token) => {
+        resolveTokenCalls++
+        // Only the real superadmin token resolves to a privileged user.
+        if (token === 'admin:1.2.3.4') return { userId: 'superadmin', role: 'superadmin' }
+        return { userId: 'low-priv', role: 'user' }
+      }
+    }
+  }
+
+  // Victim request: token "admin:1.2.3.4", single reported ip "5.6.7.8".
+  // Old key: `${token}:${ips.join(',')}` === 'admin:1.2.3.4:5.6.7.8'
+  const victimReq = {
+    headers: {
+      authorization: 'Bearer admin:1.2.3.4',
+      'x-forwarded-for': '5.6.7.8'
+    },
+    _info: {}
+  }
+  await authCheck(mockCtx, victimReq, {})
+  t.is(victimReq._info.user.role, 'superadmin', 'victim resolves and caches the superadmin user')
+  t.is(resolveTokenCalls, 1)
+
+  // Attacker request: token "admin", single reported ip "1.2.3.4:5.6.7.8" (a forged
+  // x-forwarded-for value -- unvalidated, so it may contain a colon).
+  // Old key: 'admin' + ':' + '1.2.3.4:5.6.7.8' === 'admin:1.2.3.4:5.6.7.8', identical
+  // to the victim's old key above, despite a completely different token.
+  const attackerReq = {
+    headers: {
+      authorization: 'Bearer admin', // attacker does not know the real superadmin token
+      'x-forwarded-for': '1.2.3.4:5.6.7.8' // crafted single hop containing a colon
+    },
+    _info: {}
+  }
+  await authCheck(mockCtx, attackerReq, {})
+  t.is(resolveTokenCalls, 2, 'attacker request must not be served from the superadmin cache entry')
+  t.is(attackerReq._info.user.role, 'user', 'attacker gets their own low-privilege identity, not the cached superadmin')
+})
+
 test('authCheck - no authLib', async (t) => {
   const mockCtx = {
     noAuth: false,
