@@ -1,6 +1,7 @@
 'use strict'
 const { GLOBAL_DATA_TYPES, LOCKED_TIMEZONE_DEFAULT } = require('../../constants')
 const { parseJsonQueryParam } = require('../../utils')
+const { priceBucket, fetchBucketPrices } = require('./finance.utils')
 
 async function getGlobalData (ctx, req) {
   const type = req.query.type
@@ -39,9 +40,30 @@ async function getGlobalData (ctx, req) {
   })
 }
 
+// Captures what the rebate was worth when it was received, so its USD value
+// stays fixed instead of being re-derived from a daily price later. A rebate
+// entered close to real time is a straight cache hit; a backdated one may have
+// no recorded price yet, and must not fail the write for it — the read path
+// falls back and the backfill script fills the gap.
+async function priceRebateAtReceipt (ctx, data) {
+  try {
+    const bucketTs = priceBucket(data.ts)
+    const prices = await fetchBucketPrices(ctx, [bucketTs])
+    if (prices[bucketTs]) return { ...data, priceUSD: prices[bucketTs] }
+  } catch (err) {
+    console.error('ERR_PRICE_REBATE_AT_RECEIPT', err)
+  }
+  return data
+}
+
 async function setGlobalData (ctx, req) {
-  const data = req.body.data
+  let data = req.body.data
   const type = req.query.type
+
+  if (type === GLOBAL_DATA_TYPES.POOL_REBATES && !data?.remove && Number.isFinite(data?.ts)) {
+    data = await priceRebateAtReceipt(ctx, data)
+  }
+
   return await ctx.globalDataLib.setGlobalData(data, type)
 }
 

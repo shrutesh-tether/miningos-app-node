@@ -797,6 +797,14 @@ const POOL_HASHRATE_INTERVALS_MS = {
   '3h': 3 * 60 * 60 * 1000
 }
 
+const MEMPOOL_EXT_DATA_KEYS = {
+  PRICE_AT_TIMESTAMPS: 'PRICE_AT_TIMESTAMPS'
+}
+
+// Payouts are priced at the BTC price recorded in the 5-minute bucket they
+// landed in. Must match the mempool worker's own bucket size.
+const PRICE_BUCKET_MS = 5 * 60 * 1000
+
 const ELECTRICITY_EXT_DATA_KEYS = {
   FORECAST: 'forecast',
   FORECAST_SETTINGS: 'forecastSettings',
@@ -1464,6 +1472,8 @@ module.exports = {
   PERIOD_TYPES,
   MINERPOOL_EXT_DATA_KEYS,
   POOL_HASHRATE_INTERVALS_MS,
+  MEMPOOL_EXT_DATA_KEYS,
+  PRICE_BUCKET_MS,
   NON_METRIC_KEYS,
   BTC_SATS,
   RANGE_BUCKETS,

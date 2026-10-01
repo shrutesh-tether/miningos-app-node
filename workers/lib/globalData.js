@@ -225,8 +225,11 @@ class GlobalDataLib {
       return true
     }
     if (!Number.isFinite(data.amountBTC) || data.amountBTC <= 0) throw new Error('ERR_INVALID_AMOUNT')
-    const { ts, amountBTC, txid, sender, receiver } = data
-    await db.put(key, JSON.stringify({ site: this.site, ts, amountBTC, txid, sender, receiver }))
+    const { ts, amountBTC, txid, sender, receiver, priceUSD } = data
+    // priceUSD is the BTC price when the rebate was received. Absent for rows
+    // written before receipt pricing existed, and for backdated entries whose
+    // price was not on hand; the finance read path falls back for those.
+    await db.put(key, JSON.stringify({ site: this.site, ts, amountBTC, txid, sender, receiver, priceUSD }))
     return true
   }
 

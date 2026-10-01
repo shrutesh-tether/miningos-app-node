@@ -4,6 +4,7 @@ const test = require('brittle')
 const { getGlobalConfig, setGlobalConfig, getFeatureConfig, getFeatures, setFeatures, getGlobalData, setGlobalData } = require('../../../workers/lib/server/handlers/global.handlers')
 const { GLOBAL_DATA_TYPES, LOCKED_TIMEZONE_DEFAULT } = require('../../../workers/lib/constants')
 const { withDataProxy } = require('../helpers/mockHelpers')
+const { priceBucket } = require('../../../workers/lib/server/handlers/finance.utils')
 
 test('getGlobalConfig - with fields query param', async (t) => {
   const mockCtx = withDataProxy({
@@ -237,4 +238,66 @@ test('setGlobalData - basic functionality', async (t) => {
   const result = await setGlobalData(mockCtx, mockReq)
   t.is(result, true, 'should return true')
   t.pass()
+})
+
+// A rebate is worth what BTC cost when it arrived, so that price is captured on
+// the way in rather than re-derived from a daily price whenever it is read back.
+const rebateCtx = (jRequest) => withDataProxy({
+  conf: { orks: [{ rpcPublicKey: 'key1' }] },
+  net_r0: { jRequest },
+  globalDataLib: { setGlobalData: async (data) => data }
+})
+
+test('setGlobalData - a rebate is stored with the BTC price it was received at', async (t) => {
+  const ts = Date.UTC(2024, 0, 15, 10, 32)
+  const bucketTs = priceBucket(ts)
+
+  const stored = await setGlobalData(
+    rebateCtx(async (_key, method, payload) => {
+      if (method === 'getWrkExtData' && payload.query.key === 'PRICE_AT_TIMESTAMPS') {
+        t.alike(payload.query.timestamps, [bucketTs], 'asks for the bucket the rebate landed in')
+        return { prices: { [bucketTs]: 42000 }, missing: [] }
+      }
+      return {}
+    }),
+    { body: { data: { ts, amountBTC: 0.5 } }, query: { type: GLOBAL_DATA_TYPES.POOL_REBATES } }
+  )
+
+  t.is(stored.priceUSD, 42000)
+})
+
+test('setGlobalData - a rebate with no recorded price is still stored', async (t) => {
+  const ts = Date.UTC(2024, 0, 15, 10, 32)
+
+  const stored = await setGlobalData(
+    rebateCtx(async () => ({ prices: {}, missing: [priceBucket(ts)] })),
+    { body: { data: { ts, amountBTC: 0.5 } }, query: { type: GLOBAL_DATA_TYPES.POOL_REBATES } }
+  )
+
+  t.absent(stored.priceUSD, 'a backdated rebate simply has no price yet')
+  t.is(stored.amountBTC, 0.5, 'and the entry itself is never lost over it')
+})
+
+test('setGlobalData - an unreachable price worker does not fail the rebate write', async (t) => {
+  const ts = Date.UTC(2024, 0, 15, 10, 32)
+
+  const stored = await setGlobalData(
+    rebateCtx(async () => { throw new Error('CHANNEL_CLOSED') }),
+    { body: { data: { ts, amountBTC: 0.5 } }, query: { type: GLOBAL_DATA_TYPES.POOL_REBATES } }
+  )
+
+  t.is(stored.amountBTC, 0.5)
+  t.absent(stored.priceUSD)
+})
+
+test('setGlobalData - removing a rebate skips the price lookup', async (t) => {
+  let asked = false
+
+  const stored = await setGlobalData(
+    rebateCtx(async () => { asked = true; return {} }),
+    { body: { data: { ts: Date.now(), remove: true } }, query: { type: GLOBAL_DATA_TYPES.POOL_REBATES } }
+  )
+
+  t.absent(asked, 'a delete needs no price')
+  t.is(stored.remove, true)
 })
