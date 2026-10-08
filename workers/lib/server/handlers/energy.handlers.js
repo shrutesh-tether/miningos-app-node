@@ -6,10 +6,13 @@ const {
   RPC_METHODS,
   ELECTRICITY_EXT_DATA_KEYS,
   LOG_FIELDS,
-  AGGR_FIELDS
+  AGGR_FIELDS,
+  HISTORICAL_LOG_TYPES,
+  LOCKED_TIMEZONE_DEFAULT
 } = require('../../constants')
 const { isCentralDCSEnabled, getDCSTag } = require('../../dcs.utils')
-const { getIntervalConfig, parseEntryTs } = require('../../metrics.utils')
+const { getIntervalConfig, parseEntryTs, assertTimezone } = require('../../metrics.utils')
+const { isLocalHourStart } = require('../../period.utils')
 
 const HOUR_MS = 60 * 60 * 1000
 
@@ -184,7 +187,69 @@ const setForecastOverrideHistory = async (ctx, req) => {
     })
 }
 
+// Hourly consumption hours are aligned to the site's configured zone. It is
+// deliberately not overridable per request, so every write lands on one grid.
+const getSiteTimezone = (ctx) =>
+  assertTimezone(ctx.conf?.featureConfig?.lockedTimezone || LOCKED_TIMEZONE_DEFAULT)
+
+// Records for [start, end] from the DCS worker's consumption log, ascending by ts.
+// The same hour can come back from several orks/racks; the latest write wins.
+const getEnergyConsumption = async (ctx, req) => {
+  const { start, end } = req.query
+  const results = await ctx.dataProxy.requestDataMap(
+    RPC_METHODS.GET_HISTORICAL_LOGS,
+    { logType: HISTORICAL_LOG_TYPES.CONSUMPTION, type: WORKER_TYPES.DCS, start, end }
+  )
+
+  const byTs = new Map()
+  for (const orkResult of results) {
+    for (const entry of Array.isArray(orkResult) ? orkResult : [orkResult]) {
+      if (!entry || !Number.isFinite(entry.ts)) continue
+      const prev = byTs.get(entry.ts)
+      if (!prev || (entry.updatedAt || 0) > (prev.updatedAt || 0)) byTs.set(entry.ts, entry)
+    }
+  }
+  return [...byTs.values()].sort((a, b) => a.ts - b.ts)
+}
+
+// Upserts hourly consumption on the DCS worker. Saving an hour with zeros is how
+// it is cleared. Validated here first: the ork drops rack errors (a rejected write
+// comes back as an empty result), so success is only reported when a rack
+// confirms the write.
+const saveEnergyConsumption = async (ctx, req) => {
+  const { entries } = req.body
+  const timezone = getSiteTimezone(ctx)
+
+  const seen = new Set()
+  for (const { ts } of entries) {
+    if (!isLocalHourStart(ts, timezone)) throw new Error('ERR_TS_NOT_HOUR_ALIGNED')
+    if (seen.has(ts)) throw new Error('ERR_TS_DUPLICATE')
+    seen.add(ts)
+  }
+
+  const results = await ctx.dataProxy.requestData(RPC_METHODS.SAVE_HISTORICAL_LOG, {
+    logType: HISTORICAL_LOG_TYPES.CONSUMPTION,
+    type: WORKER_TYPES.DCS,
+    timezone,
+    entries
+  })
+
+  let written = false
+  for (const orkResult of results) {
+    if (orkResult?.error) {
+      console.error(new Date().toISOString(), 'ERR_CONSUMPTION_SAVE_ORK', orkResult.error)
+      continue
+    }
+    if (Array.isArray(orkResult) && orkResult.some(r => r?.upserted === entries.length)) written = true
+  }
+  if (!written) throw new Error('ERR_CONSUMPTION_SAVE_FAILED')
+
+  return { success: true, upserted: entries.length }
+}
+
 module.exports = {
+  getEnergyConsumption,
+  saveEnergyConsumption,
   getEnergyForecast,
   setAvailableEnergy,
   setAvailableEnergyHistory,

@@ -143,7 +143,8 @@ module.exports = (ctx) => {
             endExcl: { type: 'integer' },
             overwriteCache: { type: 'boolean' },
             tag: { type: 'string' },
-            logType: { type: 'string' }, // allowed types : alerts, info
+            // worker-owned log types (e.g. consumption) are served by their own permissioned routes
+            logType: { type: 'string', enum: ['alerts', 'info'] },
             query: { type: 'string' },
             fields: { type: 'string' }
           },

@@ -31,7 +31,7 @@ These routes reject it with `400 ERR_TIMEZONE_UNSUPPORTED`:
 - `/auth/metrics/revenue/hourly`, `/auth/metrics/power-mode`, `/auth/metrics/power-mode/timeline`
 - `/auth/metrics/temperature`, `/auth/metrics/cooling`, `/auth/metrics/containers/:id/history`
 - `/auth/tail-log`, `/auth/tail-log/multi`, `/auth/history-log`
-- `/auth/site/power-consumption`, `/auth/energy/forecast/history`
+- `/auth/site/power-consumption`, `/auth/energy/forecast/history`, `/auth/energy/consumption`
 - `/auth/alerts/history`, `/auth/work-orders/:id/audit`
 
 ```json
@@ -1138,3 +1138,82 @@ curl -H "Authorization:Bearer TOKEN" \
 ```
 
 ---
+
+### Energy Consumption Endpoints
+
+Hourly consumption is stored on the DCS worker, one record per local hour of the site zone (`featureConfig.lockedTimezone`, default `America/Campo_Grande`). Every `ts` is the UTC ms instant at which that local hour starts, so in a zone like `Asia/Kolkata` (UTC+5:30) hours start at :30 UTC. The zone always comes from the site config; a `timezone` query parameter is rejected.
+
+#### `GET /auth/energy/consumption`
+
+**Get hourly consumption records for a time range**
+
+**Auth Required:** Yes (`electricity:r`)  
+**Query Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `start` | integer | Yes | Start timestamp (ms, inclusive) |
+| `end` | integer | Yes | End timestamp (ms, inclusive) |
+| `overwriteCache` | boolean | No | Bypass cache |
+
+**Example:**
+```bash
+curl -H "Authorization:Bearer TOKEN" \
+  "http://localhost:3000/auth/energy/consumption?start=1767236400000&end=1767243600000"
+```
+
+**Response:** records ascending by `ts`; hours with nothing stored are absent.
+```json
+[
+  {
+    "ts": 1767236400000,
+    "totalConsumptionMWh": 41.2,
+    "cduConsumptionMWh": 1.4,
+    "rectifier1ConsumptionMWh": 19.6,
+    "rectifier2ConsumptionMWh": 19.5,
+    "timezone": "America/Campo_Grande",
+    "updatedAt": 1767240000000
+  }
+]
+```
+
+---
+
+#### `POST /auth/energy/consumption`
+
+**Create or update hourly consumption records**
+
+Each entry replaces whatever is stored for its hour. There is no delete: to clear an hour, save it with all four values set to `0`. The whole request is rejected if any entry is invalid.
+
+**Auth Required:** Yes (`electricity:rw`)  
+**Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `entries` | array | Yes | 1 to 744 entries |
+| `entries[].ts` | integer | Yes | Start of a local hour in the site zone (UTC ms) |
+| `entries[].totalConsumptionMWh` | number ≥ 0 | Yes | Total consumption for the hour |
+| `entries[].cduConsumptionMWh` | number ≥ 0 | Yes | CDU consumption |
+| `entries[].rectifier1ConsumptionMWh` | number ≥ 0 | Yes | Rectifier 1 consumption |
+| `entries[].rectifier2ConsumptionMWh` | number ≥ 0 | Yes | Rectifier 2 consumption |
+
+**Example:**
+```bash
+curl -X POST -H "Authorization:Bearer TOKEN" -H "Content-Type: application/json" \
+  -d '{"entries":[{"ts":1767236400000,"totalConsumptionMWh":41.2,"cduConsumptionMWh":1.4,"rectifier1ConsumptionMWh":19.6,"rectifier2ConsumptionMWh":19.5}]}' \
+  "http://localhost:3000/auth/energy/consumption"
+```
+
+**Response:**
+```json
+{ "success": true, "upserted": 1 }
+```
+
+**Errors (400):**
+
+| Message | Cause |
+|---------|-------|
+| `ERR_TS_NOT_HOUR_ALIGNED` | A `ts` is not the start of a local hour in the site zone |
+| `ERR_TS_DUPLICATE` | The same `ts` appears twice in `entries` |
+| `ERR_CONSUMPTION_SAVE_FAILED` | No DCS worker confirmed the write (worker unreachable or not yet upgraded) |
+| `ERR_TIMEZONE_UNSUPPORTED` | A `timezone` query parameter was sent |

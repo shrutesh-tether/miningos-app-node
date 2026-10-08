@@ -1,7 +1,46 @@
 'use strict'
 
+const { CONSUMPTION_FIELDS } = require('../../constants')
+
+// At most a month of hours (31 days x 24) per request.
+const MAX_CONSUMPTION_ENTRIES = 744
+
+const consumptionValue = { type: 'number', minimum: 0 }
+
 const schemas = {
+  query: {
+    energyConsumption: {
+      type: 'object',
+      properties: {
+        start: { type: 'integer', minimum: 0 },
+        end: { type: 'integer', minimum: 0 },
+        overwriteCache: { type: 'boolean' }
+      },
+      required: ['start', 'end']
+    }
+  },
   body: {
+    energyConsumption: {
+      type: 'object',
+      properties: {
+        entries: {
+          type: 'array',
+          minItems: 1,
+          maxItems: MAX_CONSUMPTION_ENTRIES,
+          items: {
+            type: 'object',
+            properties: {
+              ts: { type: 'integer', minimum: 0 },
+              ...Object.fromEntries(CONSUMPTION_FIELDS.map(field => [field, consumptionValue]))
+            },
+            required: ['ts', ...CONSUMPTION_FIELDS],
+            additionalProperties: false
+          }
+        }
+      },
+      required: ['entries'],
+      additionalProperties: false
+    },
     availableEnergy: {
       type: 'object',
       properties: {

@@ -238,6 +238,7 @@ const ENDPOINTS = {
   ENERGY_FORECAST_OVERRIDE_HISTORY: '/auth/energy/forecast/override-history',
   ENERGY_AVAILABLE: '/auth/energy/available',
   ENERGY_AVAILABLE_HISTORY: '/auth/energy/available-history',
+  ENERGY_CONSUMPTION: '/auth/energy/consumption',
   // Work Order endpoints
   WORK_ORDERS: '/auth/work-orders',
   WORK_ORDERS_BATCH: '/auth/work-orders/batch',
@@ -347,6 +348,7 @@ const RPC_METHODS = {
   SET_WRK_EXT_DATA: 'setWrkExtData',
   LIST_THINGS: 'listThings',
   GET_HISTORICAL_LOGS: 'getHistoricalLogs',
+  SAVE_HISTORICAL_LOG: 'saveHistoricalLog',
   TAIL_LOG: 'tailLog',
   TAIL_LOG_MULTI: 'tailLogMulti',
   GLOBAL_CONFIG: 'getGlobalConfig',
@@ -367,6 +369,21 @@ const WORKER_TYPES = {
   // (WrkDCSBase 'dcs' + '-siemens'); the stat log is tailed by this type.
   DCS: 'dcs-siemens'
 }
+
+// Historical log types owned by specific workers (served via getHistoricalLogs /
+// saveHistoricalLog). 'consumption' lives on the DCS worker.
+const HISTORICAL_LOG_TYPES = {
+  CONSUMPTION: 'consumption'
+}
+
+// Per-hour consumption values (MWh) stored on the DCS worker; mirrors the worker's
+// CONSUMPTION_FIELDS, all required on every entry.
+const CONSUMPTION_FIELDS = [
+  'totalConsumptionMWh',
+  'cduConsumptionMWh',
+  'rectifier1ConsumptionMWh',
+  'rectifier2ConsumptionMWh'
+]
 
 // Spare parts are inventory things tagged t-inventory-miner_part-<type>
 const SPARE_PART_TYPES = ['controller', 'hashboard', 'psu']
@@ -1451,6 +1468,8 @@ module.exports = {
   OPERATIONS,
   DEFAULTS,
   LOCKED_TIMEZONE_DEFAULT,
+  HISTORICAL_LOG_TYPES,
+  CONSUMPTION_FIELDS,
   STATUS_CODES,
   RPC_TIMEOUT,
   RPC_CONCURRENCY_LIMIT,

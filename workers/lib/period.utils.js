@@ -32,6 +32,16 @@ function zoneOffsetMs (ts, timeZone) {
   return asUtc - ts
 }
 
+// True when `ts` is the first instant of a wall-clock hour in `timeZone` (DST-safe:
+// the offset is taken at `ts`). The whole-minute check comes first because
+// zoneOffsetMs only resolves seconds, so a sub-minute remainder would otherwise be
+// absorbed into the offset. Mirrored by the DCS worker's consumption store.
+function isLocalHourStart (ts, timeZone) {
+  const zone = requireZone(timeZone, 'isLocalHourStart')
+  if (!Number.isSafeInteger(ts) || ts < 0 || ts % 60000 !== 0) return false
+  return (ts + zoneOffsetMs(ts, zone)) % 3600000 === 0
+}
+
 // First instant of the local calendar day (in `timeZone`) containing `ts`. DST-safe:
 // resolved twice because the naive guess can land on the wrong side of a shift.
 const localDayStart = (ts, timeZone) => {
@@ -206,6 +216,7 @@ const aggregateByPeriod = (log, period, nonMetricKeys = [], options = {}) => {
 module.exports = {
   getStartOfDay,
   zoneOffsetMs,
+  isLocalHourStart,
   localDayStart,
   localWeekStart,
   localMonthStartTs,

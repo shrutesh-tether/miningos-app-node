@@ -2,6 +2,8 @@
 
 const test = require('brittle')
 const {
+  getEnergyConsumption,
+  saveEnergyConsumption,
   setAvailableEnergy,
   setAvailableEnergyHistory,
   setForecastOverride,
@@ -11,7 +13,8 @@ const {
 const {
   RPC_METHODS,
   WORKER_TYPES,
-  ELECTRICITY_EXT_DATA_KEYS
+  ELECTRICITY_EXT_DATA_KEYS,
+  LOCKED_TIMEZONE_DEFAULT
 } = require('../../../workers/lib/constants')
 const { withDataProxy } = require('../helpers/mockHelpers')
 
@@ -285,4 +288,121 @@ test('getEnergyForecastHistory - meter fetch failure serves the history on forec
 
   t.alike(result[0][0].hourlyForecast[0], HISTORY_MINE_HOUR, 'history untouched without meter data')
   t.pass()
+})
+
+const CONS_H0 = Date.UTC(2026, 0, 1)
+const CONS_HOUR = 3600000
+
+function consEntry (ts, v = 1) {
+  return { ts, totalConsumptionMWh: v * 10, cduConsumptionMWh: v, rectifier1ConsumptionMWh: v * 4, rectifier2ConsumptionMWh: v * 4 }
+}
+
+function consumptionCtx ({ orks = [{ rpcPublicKey: 'key1' }], featureConfig, jRequest }) {
+  return withDataProxy({ conf: { orks, ...(featureConfig && { featureConfig }) }, net_r0: { jRequest } })
+}
+
+function saveReq (entries) {
+  return { body: { entries } }
+}
+
+test('getEnergyConsumption - reads the DCS consumption log, dedups by ts and sorts', async (t) => {
+  const calls = []
+  const ctx = consumptionCtx({
+    orks: [{ rpcPublicKey: 'key1' }, { rpcPublicKey: 'key2' }],
+    jRequest: async (key, method, payload) => {
+      calls.push({ key, method, payload })
+      if (key === 'key1') return [{ ...consEntry(CONS_H0 + CONS_HOUR), updatedAt: 1 }, { ...consEntry(CONS_H0), updatedAt: 1 }, null]
+      return [{ ...consEntry(CONS_H0 + CONS_HOUR, 5), updatedAt: 2 }, undefined]
+    }
+  })
+
+  const result = await getEnergyConsumption(ctx, { query: { start: CONS_H0, end: CONS_H0 + CONS_HOUR } })
+
+  t.is(calls[0].method, RPC_METHODS.GET_HISTORICAL_LOGS)
+  t.alike(calls[0].payload, { logType: 'consumption', type: WORKER_TYPES.DCS, start: CONS_H0, end: CONS_H0 + CONS_HOUR })
+  t.alike(result.map(r => r.ts), [CONS_H0, CONS_H0 + CONS_HOUR], 'ascending, one per hour')
+  t.is(result[1].cduConsumptionMWh, 5, 'latest updatedAt wins')
+})
+
+test('getEnergyConsumption - throws when every ork fails', async (t) => {
+  const ctx = consumptionCtx({ jRequest: async () => { throw new Error('boom') } })
+  await t.exception(() => getEnergyConsumption(ctx, { query: { start: 0, end: 1 } }))
+})
+
+test('saveEnergyConsumption - sends entries and the locked site zone to the DCS worker', async (t) => {
+  let captured = null
+  const ctx = consumptionCtx({
+    featureConfig: { lockedTimezone: 'Asia/Kolkata' },
+    jRequest: async (key, method, payload) => {
+      captured = { method, payload }
+      return [{ upserted: payload.entries.length }]
+    }
+  })
+  const entries = [consEntry(CONS_H0 + 30 * 60000), consEntry(CONS_H0 + 90 * 60000, 0)]
+
+  const result = await saveEnergyConsumption(ctx, saveReq(entries))
+
+  t.alike(result, { success: true, upserted: 2 })
+  t.is(captured.method, RPC_METHODS.SAVE_HISTORICAL_LOG)
+  t.alike(captured.payload, {
+    logType: 'consumption',
+    type: WORKER_TYPES.DCS,
+    timezone: 'Asia/Kolkata',
+    entries
+  })
+})
+
+test('saveEnergyConsumption - rejects hours off the site grid before any rpc', async (t) => {
+  let rpcCalls = 0
+  const jRequest = async () => { rpcCalls++; return [{ upserted: 1 }] }
+
+  const kolkata = consumptionCtx({ featureConfig: { lockedTimezone: 'Asia/Kolkata' }, jRequest })
+  await t.exception(() => saveEnergyConsumption(kolkata, saveReq([consEntry(CONS_H0)])), /ERR_TS_NOT_HOUR_ALIGNED/, 'whole UTC hour is :30 local in +5:30')
+
+  const utc = consumptionCtx({ jRequest })
+  await t.exception(() => saveEnergyConsumption(utc, saveReq([consEntry(CONS_H0 + 500)])), /ERR_TS_NOT_HOUR_ALIGNED/)
+  await t.exception(() => saveEnergyConsumption(utc, saveReq([consEntry(CONS_H0), consEntry(CONS_H0, 2)])), /ERR_TS_DUPLICATE/)
+
+  t.is(rpcCalls, 0)
+})
+
+test('saveEnergyConsumption - falls back to LOCKED_TIMEZONE_DEFAULT when no zone is configured', async (t) => {
+  let captured = null
+  const ctx = consumptionCtx({
+    featureConfig: { lockedTimezone: undefined },
+    jRequest: async (key, method, payload) => { captured = payload; return [{ upserted: 1 }] }
+  })
+  await saveEnergyConsumption(ctx, saveReq([consEntry(CONS_H0)]))
+  t.is(captured.timezone, LOCKED_TIMEZONE_DEFAULT)
+})
+
+test('saveEnergyConsumption - fails loudly when no rack confirms the write', async (t) => {
+  const entries = [consEntry(CONS_H0)]
+  const cases = [
+    ['no DCS rack / rack rejected (ork returns [])', async () => []],
+    ['old ork without saveHistoricalLog', async () => { throw new Error('UNKNOWN_METHOD') }],
+    ['old DCS worker (base no-op)', async () => [undefined]],
+    ['partial write count', async () => [{ upserted: 0 }]]
+  ]
+  for (const [name, jRequest] of cases) {
+    const ctx = consumptionCtx({ jRequest })
+    await t.exception(() => saveEnergyConsumption(ctx, saveReq(entries)), /ERR_CONSUMPTION_SAVE_FAILED/, name)
+  }
+})
+
+test('saveEnergyConsumption - succeeds when one ork confirms and another errors', async (t) => {
+  const ctx = consumptionCtx({
+    orks: [{ rpcPublicKey: 'key1' }, { rpcPublicKey: 'key2' }],
+    jRequest: async (key) => {
+      if (key === 'key2') throw new Error('ork down')
+      return [{ upserted: 1 }]
+    }
+  })
+  const origError = console.error
+  const logged = []
+  console.error = (...args) => logged.push(args)
+  t.teardown(() => { console.error = origError })
+
+  t.alike(await saveEnergyConsumption(ctx, saveReq([consEntry(CONS_H0)])), { success: true, upserted: 1 })
+  t.ok(logged.some(args => args.includes('ERR_CONSUMPTION_SAVE_ORK')), 'ork failure is logged, not swallowed')
 })

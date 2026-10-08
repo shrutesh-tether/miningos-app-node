@@ -53,6 +53,7 @@ test('logs routes - schema validation', (t) => {
   if (historyLogRoute) {
     t.ok(historyLogRoute.schema, 'history-log route should have schema')
     t.ok(historyLogRoute.schema.querystring.required.includes('logType'), 'logType should be required')
+    t.alike(historyLogRoute.schema.querystring.properties.logType.enum, ['alerts', 'info'], 'worker-owned log types are not reachable here')
   }
 
   t.pass()

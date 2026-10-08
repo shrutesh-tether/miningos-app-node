@@ -8,7 +8,8 @@ const {
   localMonthStartTs,
   zoneOffsetMs,
   convertMsToSeconds,
-  aggregateByPeriod
+  aggregateByPeriod,
+  isLocalHourStart
 } = require('../../../workers/lib/period.utils')
 const metricsUtils = require('../../../workers/lib/metrics.utils')
 
@@ -251,4 +252,37 @@ test('aggregateByPeriod - throws without a timezone option, daily included', asy
   await t.exception(() => aggregateByPeriod(log, 'daily'), /aggregateByPeriod: timezone is required/,
     'daily never uses the zone, but still rejects a call site that forgot it')
   t.pass()
+})
+
+test('isLocalHourStart - follows the site zone grid, not the UTC grid', async (t) => {
+  const H0 = Date.UTC(2026, 0, 1)
+  const MIN = 60000
+  t.ok(isLocalHourStart(H0, 'UTC'))
+  t.absent(isLocalHourStart(H0 + 30 * MIN, 'UTC'))
+  t.ok(isLocalHourStart(H0 + 30 * MIN, 'Asia/Kolkata'), '+5:30 hours start at :30 UTC')
+  t.absent(isLocalHourStart(H0, 'Asia/Kolkata'))
+  t.ok(isLocalHourStart(H0, 'America/Campo_Grande'))
+})
+
+test('isLocalHourStart - takes the offset at ts across DST', async (t) => {
+  // Australia/Lord_Howe: +11:00 in southern summer, +10:30 in winter
+  const jan = Date.UTC(2026, 0, 15)
+  const jul = Date.UTC(2026, 6, 15)
+  t.ok(isLocalHourStart(jan, 'Australia/Lord_Howe'))
+  t.absent(isLocalHourStart(jan + 1800000, 'Australia/Lord_Howe'))
+  t.ok(isLocalHourStart(jul + 1800000, 'Australia/Lord_Howe'))
+  t.absent(isLocalHourStart(jul, 'Australia/Lord_Howe'))
+  // New York fall-back: 01:00 EDT and 01:00 EST are distinct valid hours
+  t.ok(isLocalHourStart(Date.UTC(2026, 10, 1, 5), 'America/New_York'))
+  t.ok(isLocalHourStart(Date.UTC(2026, 10, 1, 6), 'America/New_York'))
+})
+
+test('isLocalHourStart - rejects sub-minute remainders, non-integers and a missing zone', async (t) => {
+  const H0 = Date.UTC(2026, 0, 1)
+  t.absent(isLocalHourStart(H0 + 500, 'UTC'))
+  t.absent(isLocalHourStart(H0 + 1800500, 'Asia/Kolkata'), 'not absorbed into the zone offset')
+  t.absent(isLocalHourStart(H0 + 0.5, 'UTC'))
+  t.absent(isLocalHourStart(String(H0), 'UTC'))
+  t.absent(isLocalHourStart(-3600000, 'UTC'))
+  await t.exception(() => isLocalHourStart(H0), /isLocalHourStart: timezone is required/)
 })

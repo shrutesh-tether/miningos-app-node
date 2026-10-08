@@ -1,7 +1,7 @@
 'use strict'
 
 const { ENDPOINTS, HTTP_METHODS, AUTH_PERMISSIONS } = require('../../constants')
-const { getEnergyForecast, setAvailableEnergy, getEnergyForecastHistory, setForecastSettings, getForecastSettings, setForecastOverride, setAvailableEnergyHistory, setForecastOverrideHistory } = require('../handlers/energy.handlers')
+const { getEnergyConsumption, saveEnergyConsumption, getEnergyForecast, setAvailableEnergy, getEnergyForecastHistory, setForecastSettings, getForecastSettings, setForecastOverride, setAvailableEnergyHistory, setForecastOverrideHistory } = require('../handlers/energy.handlers')
 const { createCachedAuthRoute, createAuthRoute, rejectTimezone } = require('../lib/routeHelpers')
 const schemas = require('../schemas/energy.schemas')
 
@@ -98,6 +98,30 @@ module.exports = (ctx) => [
     }, [AUTH_PERMISSIONS.FORECAST_OVERVIEW]),
     schema: {
       body: schemas.body.forecastOverride
+    }
+  },
+  {
+    method: HTTP_METHODS.GET,
+    url: ENDPOINTS.ENERGY_CONSUMPTION,
+    preValidation: rejectTimezone(),
+    schema: {
+      querystring: schemas.query.energyConsumption
+    },
+    ...createCachedAuthRoute(
+      ctx,
+      (req) => ['energy-consumption', req.query.start, req.query.end],
+      ENDPOINTS.ENERGY_CONSUMPTION,
+      getEnergyConsumption,
+      [AUTH_PERMISSIONS.ELECTRICITY]
+    )
+  },
+  {
+    method: HTTP_METHODS.POST,
+    url: ENDPOINTS.ENERGY_CONSUMPTION,
+    preValidation: rejectTimezone(),
+    ...createAuthRoute(ctx, saveEnergyConsumption, [AUTH_PERMISSIONS.ELECTRICITY]),
+    schema: {
+      body: schemas.body.energyConsumption
     }
   }
 ]

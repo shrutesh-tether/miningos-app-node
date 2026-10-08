@@ -23,6 +23,7 @@ test('energy routes - route definitions', (t) => {
   t.ok(routeUrls.includes(ENDPOINTS.ENERGY_FORECAST_OVERRIDE_HISTORY), 'should have forecast override history route')
   t.ok(routeUrls.includes(ENDPOINTS.ENERGY_AVAILABLE), 'should have available energy route')
   t.ok(routeUrls.includes(ENDPOINTS.ENERGY_AVAILABLE_HISTORY), 'should have available energy history route')
+  t.ok(routeUrls.includes(ENDPOINTS.ENERGY_CONSUMPTION), 'should have energy consumption route')
   t.pass()
 })
 
@@ -90,6 +91,43 @@ test('energy routes - availableEnergy schema validates availableMw items', (t) =
   t.absent(validateHist({ start: 1000, end: 2000 }), 'history rejects missing both fields')
   t.absent(validateHist({ start: 1000, end: 2000, availableMw: 48.1 }), 'history rejects availableMw above 48')
   t.pass()
+})
+
+test('energy routes - consumption GET and POST', (t) => {
+  const routes = createRoutesForTest(ROUTES_PATH).filter(r => r.url === ENDPOINTS.ENERGY_CONSUMPTION)
+  t.alike(routes.map(r => r.method).sort(), [HTTP_METHODS.GET, HTTP_METHODS.POST].sort(), 'GET and POST only, no DELETE')
+
+  const get = routes.find(r => r.method === HTTP_METHODS.GET)
+  t.alike(get.schema.querystring.required, ['start', 'end'])
+  t.ok(get.preValidation, 'GET rejects a timezone param')
+
+  const post = routes.find(r => r.method === HTTP_METHODS.POST)
+  t.ok(post.preValidation, 'POST rejects a timezone param')
+  t.alike(post.schema.body.required, ['entries'])
+})
+
+test('energy routes - energyConsumption schema validates entries', (t) => {
+  const Ajv = require('ajv')
+  const schemas = require('../../../workers/lib/server/schemas/energy.schemas')
+  const validate = new Ajv().compile(schemas.body.energyConsumption)
+  const validateQuery = new Ajv({ coerceTypes: true }).compile(schemas.query.energyConsumption)
+  const entry = { ts: 1767225600000, totalConsumptionMWh: 10, cduConsumptionMWh: 1, rectifier1ConsumptionMWh: 4, rectifier2ConsumptionMWh: 4 }
+
+  t.ok(validate({ entries: [entry] }), 'accepts a full entry')
+  t.ok(validate({ entries: [{ ...entry, totalConsumptionMWh: 0, cduConsumptionMWh: 0, rectifier1ConsumptionMWh: 0, rectifier2ConsumptionMWh: 0 }] }), 'accepts zeros (how an hour is cleared)')
+  t.absent(validate({ entries: [] }), 'rejects empty entries')
+  t.absent(validate({}), 'rejects missing entries')
+  t.absent(validate({ entries: new Array(745).fill(entry) }), 'rejects more than a month of hours')
+  for (const field of ['ts', 'totalConsumptionMWh', 'cduConsumptionMWh', 'rectifier1ConsumptionMWh', 'rectifier2ConsumptionMWh']) {
+    const { [field]: _, ...missing } = entry
+    t.absent(validate({ entries: [missing] }), `rejects missing ${field}`)
+  }
+  t.absent(validate({ entries: [{ ...entry, cduConsumptionMWh: -1 }] }), 'rejects negative values')
+  t.absent(validate({ entries: [{ ...entry, ts: 1.5 }] }), 'rejects non-integer ts')
+  t.absent(validate({ entries: [{ ...entry, note: 'x' }] }), 'rejects unknown fields')
+
+  t.ok(validateQuery({ start: '0', end: '3600000' }), 'query coerces start/end')
+  t.absent(validateQuery({ start: 0 }), 'query requires end')
 })
 
 test('energy routes - handler functions', (t) => {

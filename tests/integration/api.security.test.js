@@ -324,6 +324,28 @@ test('Api security', { timeout: 90000 }, async (main) => {
     await testPutEndpointSecurity(n, httpClient, api, invalidToken, body, siteOperatorUser, encoding)
   })
 
+  await main.test('Api: get energy consumption', async (n) => {
+    const api = `${appNodeBaseUrl}${ENDPOINTS.ENERGY_CONSUMPTION}?start=0&end=3600000`
+    await testGetEndpointSecurity(n, httpClient, api, invalidToken, readonlyUser, encoding)
+  })
+
+  await main.test('Api: post energy consumption', async (n) => {
+    const api = `${appNodeBaseUrl}${ENDPOINTS.ENERGY_CONSUMPTION}`
+    const body = {
+      entries: [{ ts: Date.UTC(2026, 0, 1), totalConsumptionMWh: 1, cduConsumptionMWh: 0, rectifier1ConsumptionMWh: 0.5, rectifier2ConsumptionMWh: 0.5 }]
+    }
+    const options = { body }
+    await runTestCases(n, [
+      { name: 'api should fail for missing auth token', test: () => testMissingAuthToken(httpClient, 'post', api, { ...options, encoding }) },
+      { name: 'api should fail for invalid auth token', test: () => testInvalidAuthToken(httpClient, 'post', api, invalidToken, { ...options, encoding }) },
+      { name: 'api should fail for read-only electricity permission', test: () => testInvalidPermissions(httpClient, 'post', api, readonlyUser, 'ERR_AUTH_FAIL_NO_PERMS', { ...options, encoding }) }
+    ])
+    // passes auth; with no DCS rack confirming, the write must not report success
+    await n.test('api should pass auth for electricity:rw and refuse an unconfirmed write', async (t) => {
+      await testEndpointWithAuthAndError(t, httpClient, 'post', api, admin1, 'ERR_CONSUMPTION_SAVE_FAILED', { ...options, encoding })
+    })
+  })
+
   await main.test('Api: get worker-config', async (n) => {
     const api = `${appNodeBaseUrl}${ENDPOINTS.WORKER_CONFIG}?type=miner`
     await testGetEndpointSecurity(n, httpClient, api, invalidToken, readonlyUser, encoding)
