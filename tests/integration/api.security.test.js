@@ -338,10 +338,10 @@ test('Api security', { timeout: 90000 }, async (main) => {
     await runTestCases(n, [
       { name: 'api should fail for missing auth token', test: () => testMissingAuthToken(httpClient, 'post', api, { ...options, encoding }) },
       { name: 'api should fail for invalid auth token', test: () => testInvalidAuthToken(httpClient, 'post', api, invalidToken, { ...options, encoding }) },
-      { name: 'api should fail for read-only electricity permission', test: () => testInvalidPermissions(httpClient, 'post', api, readonlyUser, 'ERR_AUTH_FAIL_NO_PERMS', { ...options, encoding }) }
+      { name: 'api should fail for read-only powermeter permission', test: () => testInvalidPermissions(httpClient, 'post', api, readonlyUser, 'ERR_AUTH_FAIL_NO_PERMS', { ...options, encoding }) }
     ])
     // passes auth; with no DCS rack confirming, the write must not report success
-    await n.test('api should pass auth for electricity:rw and refuse an unconfirmed write', async (t) => {
+    await n.test('api should pass auth for powermeter:rw and refuse an unconfirmed write', async (t) => {
       await testEndpointWithAuthAndError(t, httpClient, 'post', api, admin1, 'ERR_CONSUMPTION_SAVE_FAILED', { ...options, encoding })
     })
   })

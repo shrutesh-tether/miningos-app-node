@@ -3,7 +3,7 @@
 const test = require('brittle')
 const { testModuleStructure, testHandlerFunctions, testOnRequestFunctions } = require('../helpers/routeTestHelpers')
 const { createRoutesForTest } = require('../helpers/mockHelpers')
-const { ENDPOINTS, HTTP_METHODS } = require('../../../workers/lib/constants')
+const { ENDPOINTS, HTTP_METHODS, AUTH_PERMISSIONS } = require('../../../workers/lib/constants')
 
 const ROUTES_PATH = '../../../workers/lib/server/routes/energy.routes.js'
 
@@ -104,6 +104,34 @@ test('energy routes - consumption GET and POST', (t) => {
   const post = routes.find(r => r.method === HTTP_METHODS.POST)
   t.ok(post.preValidation, 'POST rejects a timezone param')
   t.alike(post.schema.body.required, ['entries'])
+})
+
+test('energy routes - consumption GET and POST require the powermeter permission', async (t) => {
+  const checks = []
+  const ctx = {
+    conf: { ttl: 3600 },
+    authLib: {
+      resolveToken: async () => ({ userId: 'u1' }),
+      tokenHasPerms: async (token, write, perms) => {
+        checks.push({ write, perms })
+        return true
+      }
+    }
+  }
+  const routes = require(ROUTES_PATH)(ctx).filter(r => r.url === ENDPOINTS.ENERGY_CONSUMPTION)
+
+  for (const method of [HTTP_METHODS.GET, HTTP_METHODS.POST]) {
+    const route = routes.find(r => r.method === method)
+    const req = { method, headers: { authorization: 'Bearer token' }, ip: '127.0.0.1', query: {} }
+    const rep = { status: () => { t.fail(`${method} should not be denied`); return rep }, send: () => rep }
+    await route.onRequest(req, rep)
+  }
+
+  t.alike(checks, [
+    { write: false, perms: [AUTH_PERMISSIONS.POWERMETER] },
+    { write: true, perms: [AUTH_PERMISSIONS.POWERMETER] }
+  ], 'GET checks powermeter at read level, POST at write level')
+  t.is(AUTH_PERMISSIONS.POWERMETER, 'powermeter', 'permission key is powermeter')
 })
 
 test('energy routes - energyConsumption schema validates entries', (t) => {
