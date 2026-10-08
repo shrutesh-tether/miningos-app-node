@@ -112,14 +112,14 @@ module.exports = (ctx) => [
       (req) => ['energy-consumption', req.query.start, req.query.end],
       ENDPOINTS.ENERGY_CONSUMPTION,
       getEnergyConsumption,
-      [AUTH_PERMISSIONS.ELECTRICITY]
+      [AUTH_PERMISSIONS.POWERMETER]
     )
   },
   {
     method: HTTP_METHODS.POST,
     url: ENDPOINTS.ENERGY_CONSUMPTION,
     preValidation: rejectTimezone(),
-    ...createAuthRoute(ctx, saveEnergyConsumption, [AUTH_PERMISSIONS.ELECTRICITY]),
+    ...createAuthRoute(ctx, saveEnergyConsumption, [AUTH_PERMISSIONS.POWERMETER]),
     schema: {
       body: schemas.body.energyConsumption
     }
