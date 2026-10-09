@@ -13,8 +13,7 @@ const {
 const {
   RPC_METHODS,
   WORKER_TYPES,
-  ELECTRICITY_EXT_DATA_KEYS,
-  LOCKED_TIMEZONE_DEFAULT
+  ELECTRICITY_EXT_DATA_KEYS
 } = require('../../../workers/lib/constants')
 const { withDataProxy } = require('../helpers/mockHelpers')
 
@@ -329,7 +328,7 @@ test('getEnergyConsumption - throws when every ork fails', async (t) => {
   await t.exception(() => getEnergyConsumption(ctx, { query: { start: 0, end: 1 } }))
 })
 
-test('saveEnergyConsumption - sends entries and the locked site zone to the DCS worker', async (t) => {
+test('saveEnergyConsumption - sends only the entries to the DCS worker, aligned to the locked site zone', async (t) => {
   let captured = null
   const ctx = consumptionCtx({
     featureConfig: { lockedTimezone: 'Asia/Kolkata' },
@@ -347,7 +346,6 @@ test('saveEnergyConsumption - sends entries and the locked site zone to the DCS 
   t.alike(captured.payload, {
     logType: 'consumption',
     type: WORKER_TYPES.DCS,
-    timezone: 'Asia/Kolkata',
     entries
   })
 })
@@ -366,14 +364,16 @@ test('saveEnergyConsumption - rejects hours off the site grid before any rpc', a
   t.is(rpcCalls, 0)
 })
 
-test('saveEnergyConsumption - falls back to LOCKED_TIMEZONE_DEFAULT when no zone is configured', async (t) => {
+test('saveEnergyConsumption - works without a configured zone and never sends one to the worker', async (t) => {
   let captured = null
   const ctx = consumptionCtx({
     featureConfig: { lockedTimezone: undefined },
     jRequest: async (key, method, payload) => { captured = payload; return [{ upserted: 1 }] }
   })
+  // LOCKED_TIMEZONE_DEFAULT shares the whole-UTC-hour grid
   await saveEnergyConsumption(ctx, saveReq([consEntry(CONS_H0)]))
-  t.is(captured.timezone, LOCKED_TIMEZONE_DEFAULT)
+  t.absent('timezone' in captured, 'timezone is not part of the worker payload')
+  t.absent('user' in captured)
 })
 
 test('saveEnergyConsumption - fails loudly when no rack confirms the write', async (t) => {

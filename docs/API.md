@@ -1171,7 +1171,6 @@ curl -H "Authorization:Bearer TOKEN" \
     "cduConsumptionMWh": 1.4,
     "rectifier1ConsumptionMWh": 19.6,
     "rectifier2ConsumptionMWh": 19.5,
-    "timezone": "America/Campo_Grande",
     "updatedAt": 1767240000000
   }
 ]

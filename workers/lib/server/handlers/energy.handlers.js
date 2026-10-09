@@ -230,7 +230,6 @@ const saveEnergyConsumption = async (ctx, req) => {
   const results = await ctx.dataProxy.requestData(RPC_METHODS.SAVE_HISTORICAL_LOG, {
     logType: HISTORICAL_LOG_TYPES.CONSUMPTION,
     type: WORKER_TYPES.DCS,
-    timezone,
     entries
   })
 
