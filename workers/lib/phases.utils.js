@@ -140,6 +140,20 @@ function getPhaseConsumptionSource (phase) {
   throw new Error('ERR_PHASE_CONSUMPTION_UNCONFIGURED')
 }
 
+const HOUR_MS = 60 * 60 * 1000
+
+/**
+ * Hour starts in [start, end] that have fully elapsed, i.e. the hours a phase's
+ * consumption series is expected to cover. The running hour has no manual entry
+ * yet by design, so it is not counted as missing.
+ */
+function elapsedHourStarts (start, end, now = Date.now()) {
+  const last = Math.min(end, now - HOUR_MS)
+  const hours = []
+  for (let ts = Math.ceil(start / HOUR_MS) * HOUR_MS; ts <= last; ts += HOUR_MS) hours.push(ts)
+  return hours
+}
+
 module.exports = {
   phaseError,
   PHASE_TOTAL,
@@ -152,5 +166,6 @@ module.exports = {
   getPoolOnlyPhases,
   getPoolOnlyAccountKeys,
   getPhaseNominals,
-  getPhaseConsumptionSource
+  getPhaseConsumptionSource,
+  elapsedHourStarts
 }

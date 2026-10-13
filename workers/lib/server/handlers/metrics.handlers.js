@@ -827,11 +827,9 @@ async function getPhaseConsumption (ctx, req, phase, bucketing) {
     source === lPhases.CONSUMPTION_SOURCES.REMAINDER ? fetchMeterPowerByHour(ctx, req, meterKey) : null
   ])
 
-  // Hours that have fully elapsed; the running hour has no entry yet by design.
-  const lastHourStart = Math.min(end, Date.now() - HOUR_MS)
   const hourly = []
   let missingHours = 0
-  for (let ts = Math.ceil(start / HOUR_MS) * HOUR_MS; ts <= lastHourStart; ts += HOUR_MS) {
+  for (const ts of lPhases.elapsedHourStarts(start, end)) {
     const manualMWh = manualByHour.get(ts)
     const meterW = meterByHour ? meterByHour.get(ts) : 0
     if (manualMWh === undefined || meterW === undefined) {

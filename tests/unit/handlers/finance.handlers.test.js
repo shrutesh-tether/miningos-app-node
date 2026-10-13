@@ -623,6 +623,84 @@ test('getRevenueSummary - phase rows divide the phase consumption by the phase n
   t.ok(Number.isFinite(totalRow.downtimeMWh), 'and the downtime energy')
 })
 
+// A manual-source phase whose ACME entries cover only `hours` of the day.
+function makePhaseCoverageCtx (dayTs, hours) {
+  return withDataProxy({
+    conf: {
+      orks: [{ rpcPublicKey: 'key1' }],
+      featureConfig: {
+        centralDCSSetup: { enabled: true },
+        phases: [{
+          id: 'phase1',
+          label: 'Phase 1',
+          minerTelemetry: false,
+          consumption: { source: 'manual' },
+          pool: { accounts: [{ poolType: 'ocean', username: 'acme-addr' }] }
+        }]
+      }
+    },
+    net_r0: {
+      jRequest: async (_key, method, payload) => {
+        if (method === 'getHistoricalLogs') {
+          return hours.map(h => ({ ts: dayTs + h * 3600000, totalConsumptionMWh: 0.6 }))
+        }
+        if (method === 'tailLog') return [{ ts: dayTs, site_power_w: 10_000_000 }]
+        if (method === 'getWrkExtData') {
+          const key = payload.query && payload.query.key
+          if (key === 'HISTORICAL_PRICES') return [{ ts: dayTs, priceUSD: 100000 }]
+          if (key === 'current_price') return [{ currentPrice: 100000 }]
+          return []
+        }
+        if (method === 'getGlobalConfig') {
+          return { nominalPowerAvailability_MW: 10, phaseNominals: { phase1: { nominalPower_MW: 1.2 } } }
+        }
+        return {}
+      }
+    },
+    globalDataLib: { getGlobalData: async () => [] }
+  })
+}
+
+test('getRevenueSummary - phase days count the hours without an entry', async (t) => {
+  const dayTs = Date.UTC(2019, 6, 15)
+  const covered = Array.from({ length: 24 }, (_, h) => h).filter(h => ![3, 4, 5].includes(h))
+  const ctx = makePhaseCoverageCtx(dayTs, covered)
+  const query = { start: dayTs, end: dayTs + 86400000 - 1, phase: 'phase1' }
+
+  const res = await getRevenueSummary(ctx, { query }, {})
+  const row = res.log.find(e => e.ts === dayTs)
+  t.is(row.missingHours, 3, 'the gap is surfaced on the day')
+  t.is(row.powerW, 600000, 'power still averages the hours present')
+  t.is(res.summary.missingHours, 3)
+
+  const consumption = await getConsumption(ctx, { query: { ...query, interval: '1h' } })
+  t.is(res.summary.missingHours, consumption.summary.missingHours, 'matches /metrics/consumption?phase=')
+})
+
+test('getRevenueSummary - a phase window without entries is unknown, not idle', async (t) => {
+  const dayTs = Date.UTC(2019, 7, 15)
+  const ctx = makePhaseCoverageCtx(dayTs, [])
+  const query = { start: dayTs, end: dayTs + 86400000 - 1, phase: 'phase1' }
+
+  const daily = await getRevenueSummary(ctx, { query }, {})
+  const row = daily.log.find(e => e.ts === dayTs)
+  t.is(row.missingHours, 24)
+  t.is(row.powerUtilization, null, 'no utilization without input')
+  t.is(row.downtimeMWh, null, 'and no downtime')
+  t.is(daily.summary.avgPowerUtilization, null)
+  t.is(daily.summary.totalDowntimeMWh, null, 'the total is not the full nominal')
+  t.is(daily.summary.missingHours, 24)
+
+  const monthly = await getRevenueSummary(ctx, { query: { ...query, period: 'monthly' } }, {})
+  t.is(monthly.log[0].downtimeMWh, null, 'the period sum does not read null as zero downtime')
+  t.is(monthly.log[0].missingHours, 24)
+  t.is(monthly.summary.totalDowntimeMWh, null)
+
+  const site = await getRevenueSummary(ctx, { query: { start: query.start, end: query.end } }, {})
+  t.is(site.summary.missingHours, undefined, 'the site summary shape is unchanged')
+  t.ok(site.log.every(e => !('missingHours' in e)))
+})
+
 test('getRevenueSummary monthly - rates use MEAN, totals use SUM', async (t) => {
   const day1 = Date.UTC(2024, 0, 15)
   const day2 = Date.UTC(2024, 0, 16)
