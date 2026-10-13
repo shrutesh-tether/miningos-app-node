@@ -6,13 +6,26 @@ const { GLOBAL_DATA_TYPES, LCOE_SOURCES, USER_SETTINGS_TYPE, POOL_REBATE_SOURCES
 const gLibUtilBase = require('@bitfinex/lib-js-util-base')
 const { isValidJsonObject } = require('./utils')
 
+function isValidAmount (val) {
+  return val === undefined || val === null || (Number.isFinite(val) && val >= 0)
+}
+
+// Per-phase figures keyed by phase id. Top-level capexUsd stays the site
+// build-out's (Phase 1); a phase with its own build-out (Phase 1.5) stores its
+// capex here.
+function validatePhaseCostFields (phases) {
+  if (phases === undefined || phases === null) return
+  if (!isValidJsonObject(phases)) throw new Error('ERR_INVALID_PHASES')
+  for (const entry of Object.values(phases)) {
+    if (!isValidJsonObject(entry)) throw new Error('ERR_INVALID_PHASES')
+    if (!isValidAmount(entry.capexUsd)) throw new Error('ERR_INVALID_AMORTIZATION')
+  }
+}
+
 function validateCostParameterFields (data) {
   const amounts = ['minerAmortizationUsd', 'infraAmortizationUsd', 'capexUsd']
   for (const field of amounts) {
-    const val = data[field]
-    if (val !== undefined && val !== null && (!Number.isFinite(val) || val < 0)) {
-      throw new Error('ERR_INVALID_AMORTIZATION')
-    }
+    if (!isValidAmount(data[field])) throw new Error('ERR_INVALID_AMORTIZATION')
   }
 
   const { marginPct } = data
@@ -160,17 +173,26 @@ class GlobalDataLib {
     const { year, month, ...fields } = data
     const current = await this.getGloabalDbDataForType(GLOBAL_DATA_TYPES.COST_PARAMETERS)
 
-    // No year/month: save the site defaults, keeping whatever monthly overrides are already stored.
+    // No year/month: save the site defaults, keeping whatever monthly overrides and
+    // per-phase figures are already stored when the payload leaves them out.
     if (year === undefined && month === undefined) {
       validateCostParameterFields(fields)
+      validatePhaseCostFields(fields.phases)
       return this.saveGlobalDataForType(
-        { ...fields, site: this.site, overrides: fields.overrides ?? current.overrides },
+        {
+          ...fields,
+          site: this.site,
+          overrides: fields.overrides ?? current.overrides,
+          phases: fields.phases ?? current.phases
+        },
         GLOBAL_DATA_TYPES.COST_PARAMETERS
       )
     }
 
     if (!Number.isInteger(year) || year < 0) throw new Error('ERR_INVALID_YEAR')
     if (!Number.isInteger(month) || month < 1 || month > 12) throw new Error('ERR_INVALID_MONTH')
+    // Capex is a one-off build-out figure, not a monthly one.
+    if (fields.phases !== undefined) throw new Error('ERR_INVALID_PHASES')
     validateCostParameterFields(fields)
 
     const monthKey = `${year}-${String(month).padStart(2, '0')}`

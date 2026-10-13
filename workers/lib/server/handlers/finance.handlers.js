@@ -1027,10 +1027,15 @@ async function getRevenueSummary (ctx, req) {
     trackFees: true
   })
   const costsByMonth = processCostsData(productionCosts)
-  if (phase && phase.consumption?.source === lPhases.CONSUMPTION_SOURCES.MANUAL) {
-    // Site opex from Cost Input belongs to the site build-out; a manual-source
-    // phase (the container) carries only its energy costs.
-    for (const month of Object.values(costsByMonth)) month.operationalCostPerDay = 0
+  if (phase) {
+    for (const month of Object.values(costsByMonth)) {
+      // A stored energy cost is the site's whole bill; a phase prices its own
+      // consumption at the month's LCOE instead.
+      month.energyCostPerDay = null
+      // Site opex from Cost Input belongs to the site build-out; a manual-source
+      // phase (the container) carries only its energy costs.
+      if (phase.consumption?.source === lPhases.CONSUMPTION_SOURCES.MANUAL) month.operationalCostPerDay = 0
+    }
   }
   const dailyBlocks = processBlockData(blockResults, timezone)
   const nominalPowerMW = phase
@@ -1153,7 +1158,43 @@ async function getRevenueSummary (ctx, req) {
   }
   const summary = calculateDetailedRevenueSummary(aggregated, currentBtcPrice)
 
-  return { log: aggregated, summary: { ...summary, ...pricingStatus(missingPriceBuckets) } }
+  return {
+    log: aggregated,
+    summary: { ...summary, ...pricingStatus(missingPriceBuckets), ...resolveCapex(ctx, phase, costParameters) }
+  }
+}
+
+/**
+ * Capex follows the opex split: top-level capexUsd is the site build-out and
+ * belongs to every phase but a manual-source one, which carries its own
+ * build-out under costParameters.phases[id].capexUsd. The site view sums the
+ * build-out and every such phase. A phase whose figure is not entered yet is
+ * listed in capexMissingPhases instead of counting as zero, so a partial site
+ * total is never mistaken for a complete one.
+ */
+function resolveCapex (ctx, phase, costParameters) {
+  const amount = (v) => (Number.isFinite(v) ? v : null)
+  const hasOwnCapex = (p) => p?.consumption?.source === lPhases.CONSUMPTION_SOURCES.MANUAL
+  const siteCapexUsd = amount(costParameters?.capexUsd)
+
+  const ownPhases = phase
+    ? (hasOwnCapex(phase) ? [phase] : [])
+    : (lPhases.getPhases(ctx) || []).filter(hasOwnCapex)
+  const includesSite = !phase || !hasOwnCapex(phase)
+
+  const parts = includesSite ? [siteCapexUsd] : []
+  const capexMissingPhases = []
+  for (const p of ownPhases) {
+    const value = amount(costParameters?.phases?.[p.id]?.capexUsd)
+    if (value === null) capexMissingPhases.push(p.id)
+    parts.push(value)
+  }
+
+  const known = parts.filter((v) => v !== null)
+  return {
+    capexUsd: known.length ? known.reduce((a, b) => a + b, 0) : null,
+    capexMissingPhases
+  }
 }
 
 function calculateDetailedRevenueSummary (log, currentBtcPrice) {
@@ -1769,6 +1810,7 @@ module.exports = {
   processHourlyRevenues,
   calculateHourlyRevenueSummary,
   getRevenueSummary,
+  resolveCapex,
   getHashRevenue,
   getPowerCost,
   processDailyRevenueBtc,

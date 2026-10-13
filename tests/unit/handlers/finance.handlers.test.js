@@ -22,6 +22,7 @@ const {
   processHourlyRevenues,
   calculateRevenueSummary,
   getRevenueSummary,
+  resolveCapex,
   calculateDetailedRevenueSummary,
   getHashRevenue,
   getPowerCost,
@@ -1739,6 +1740,100 @@ test('resolveLcoeUsdPerMwh - falls back to zero on anything unusable', (t) => {
   t.is(resolveLcoeUsdPerMwh({ lcoe: { effectiveUsdPerMwh: 'cheap' } }), 0, 'non-numeric')
   t.is(resolveLcoeUsdPerMwh({ lcoe: { effectiveUsdPerMwh: -5 } }), 0, 'negative')
   t.pass()
+})
+
+test('getRevenueSummary - phase costs and capex follow the phase build-out', async (t) => {
+  // Unique month so the daily-series month cache cannot leak across tests.
+  const dayTs = Date.UTC(2019, 6, 15)
+  const phases = [
+    {
+      id: 'phase1',
+      minerTelemetry: true,
+      consumption: { source: 'remainder', meterKey: 'ccm' },
+      pool: { accounts: [{ poolType: 'ocean', username: 'site-addr' }] }
+    },
+    {
+      id: 'phase1_5',
+      minerTelemetry: false,
+      consumption: { source: 'manual' },
+      pool: { accounts: [{ poolType: 'ocean', username: 'acme-addr' }] }
+    }
+  ]
+  const costParameters = {
+    capexUsd: 1000,
+    lcoe: { effectiveUsdPerMwh: 50 },
+    phases: { phase1_5: { capexUsd: 400 } }
+  }
+  const ctx = withDataProxy({
+    conf: { orks: [{ rpcPublicKey: 'key1' }], featureConfig: { centralDCSSetup: { enabled: true }, phases } },
+    net_r0: {
+      jRequest: async (_key, method, payload) => {
+        if (method === 'getHistoricalLogs') {
+          return Array.from({ length: 24 }, (_, h) => ({ ts: dayTs + h * 3600000, totalConsumptionMWh: 0.6 }))
+        }
+        if (method === 'tailLog') {
+          return [{ ts: dayTs, site_power_w: 10_000_000, by_meter_power_w: { ccm: 10_000_000 }, hashrate_mhs_5m_sum_aggr: 1e9 }]
+        }
+        if (method === 'getWrkExtData') {
+          const key = payload.query && payload.query.key
+          if (key === 'transactions') {
+            return [{ ts: dayTs, transactions: [{ ts: dayTs, satoshis_net_earned: 50000000, username: 'acme-addr' }] }]
+          }
+          if (key === 'HISTORICAL_PRICES') return [{ ts: dayTs, priceUSD: 100000 }]
+          if (key === 'current_price') return [{ currentPrice: 100000 }]
+          return []
+        }
+        if (method === 'getGlobalConfig') return { nominalPowerAvailability_MW: 10, phaseNominals: { phase1: { nominalPower_MW: 8 }, phase1_5: { nominalPower_MW: 1.2 } } }
+        return {}
+      }
+    },
+    globalDataLib: {
+      getGlobalData: async ({ type }) => {
+        if (type === 'costParameters') return costParameters
+        // A legacy month carrying the whole site's energy bill: 31000 / 31 days.
+        if (type === 'productionCosts') return [{ site: 'site1', year: 2019, month: 7, energyCostsUSD: 31000, operationalCostsUSD: 3100 }]
+        return []
+      }
+    }
+  })
+  const query = { start: dayTs - 1000, end: dayTs + 86400000, overwriteCache: true }
+  const dayRow = (res) => res.log.find(e => e.ts === dayTs)
+
+  const phased = await getRevenueSummary(ctx, { query: { ...query, phase: 'phase1_5' } }, {})
+  t.ok(Math.abs(dayRow(phased).energyCostsUSD - 0.6 * 24 * 50) < 1e-9, 'phase energy is its own consumption at LCOE, not the site bill')
+  t.is(dayRow(phased).operationalCostsUSD, 0, 'manual-source phase carries no Cost Input opex')
+  t.is(phased.summary.capexUsd, 400, 'phase 1.5 amortizes its own capex')
+  t.alike(phased.summary.capexMissingPhases, [])
+
+  const phase1 = await getRevenueSummary(ctx, { query: { ...query, phase: 'phase1' } }, {})
+  t.ok(Math.abs(dayRow(phase1).energyCostsUSD - (10 - 0.6) * 24 * 50) < 1e-6, 'phase 1 energy is the meter remainder at LCOE')
+  t.is(dayRow(phase1).operationalCostsUSD, 100, 'phase 1 carries the Cost Input opex')
+  t.is(phase1.summary.capexUsd, 1000, 'phase 1 amortizes the existing capex')
+
+  const total = await getRevenueSummary(ctx, { query }, {})
+  t.is(dayRow(total).energyCostsUSD, 1000, 'the site view keeps the stored bill')
+  t.is(dayRow(total).operationalCostsUSD, 100)
+  t.is(total.summary.capexUsd, 1400, 'site capex sums the build-out and phase 1.5')
+})
+
+test('resolveCapex - splits capex along the phase build-outs', (t) => {
+  const phases = [
+    { id: 'phase1', consumption: { source: 'remainder', meterKey: 'ccm' } },
+    { id: 'phase1_5', consumption: { source: 'manual' } }
+  ]
+  const ctx = { conf: { featureConfig: { phases } } }
+  const params = { capexUsd: 1000, phases: { phase1_5: { capexUsd: 400 } } }
+
+  t.alike(resolveCapex(ctx, null, params), { capexUsd: 1400, capexMissingPhases: [] }, 'site sums both')
+  t.alike(resolveCapex(ctx, phases[0], params), { capexUsd: 1000, capexMissingPhases: [] }, 'phase 1 keeps the existing capex')
+  t.alike(resolveCapex(ctx, phases[1], params), { capexUsd: 400, capexMissingPhases: [] }, 'phase 1.5 has its own')
+
+  const pending = { capexUsd: 1000 }
+  t.alike(resolveCapex(ctx, null, pending), { capexUsd: 1000, capexMissingPhases: ['phase1_5'] }, 'a pending phase is flagged, not zeroed')
+  t.alike(resolveCapex(ctx, phases[1], pending), { capexUsd: null, capexMissingPhases: ['phase1_5'] }, 'phase 1.5 has no capex yet')
+  t.alike(resolveCapex(ctx, phases[0], {}), { capexUsd: null, capexMissingPhases: [] })
+
+  t.alike(resolveCapex({ conf: {} }, null, { capexUsd: 1000 }), { capexUsd: 1000, capexMissingPhases: [] }, 'sites without phases are unchanged')
 })
 
 test('getCostParameters - returns an empty object without globalDataLib', async (t) => {
