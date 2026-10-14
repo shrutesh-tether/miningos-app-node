@@ -390,7 +390,7 @@ function extractForecastSettings (results) {
 // entry in the ork global config's phaseNominals map fails loudly instead of
 // silently reporting uptime against the whole site.
 function resolvePhaseNominalPowerMW (results, phase) {
-  const powerMw = lPhases.getPhaseNominals(results, phase.id)?.powerMw ?? 500000000
+  const powerMw = lPhases.getPhaseNominals(results, phase.id)?.powerMw
   if (!Number.isFinite(powerMw) || powerMw <= 0) throw lPhases.phaseError('ERR_PHASE_NOMINAL_MISSING')
   return powerMw
 }
