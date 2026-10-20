@@ -1294,20 +1294,29 @@ async function injectSyntheticConsumptionGroups (ctx, req, log) {
     .filter(Boolean)
   if (!keys.length) return
 
-  const dayMs = METRICS_TIME.ONE_DAY_MS
-  const firstDay = Math.min(...log.map((entry) => entry.ts))
-  const lastDay = Math.max(...log.map((entry) => entry.ts))
-  // Daily rows sit on UTC midnights that can precede `start`: read their whole days.
-  const manualByHour = await fetchManualConsumptionByHour(ctx, firstDay, lastDay + dayMs - 1)
+  // A stat-1D row is a snapshot stamped at UTC midnight, which the site's zone
+  // places on its own local day (00:00Z is 20:00 the day before in UTC-4), and
+  // manual hours are logged on that local grid. Each row takes the manual hours
+  // of its local day: a UTC window from the row's ts would miss the hours of a
+  // local-day request, whose start lies after the UTC midnight row it never reads.
+  const timezone = resolveTimezone(ctx, req)
+  const dayOf = (ts) => localDayStart(ts, timezone)
+  const firstDay = dayOf(Math.min(...log.map((entry) => entry.ts)))
+  const lastDay = dayOf(Math.max(...log.map((entry) => entry.ts)))
+  const afterLastDay = dayOf(lastDay + 1.5 * METRICS_TIME.ONE_DAY_MS)
+  const manualByHour = await fetchManualConsumptionByHour(ctx, firstDay, afterLastDay - 1)
+
+  const manualByDay = new Map()
+  for (const [ts, mwh] of manualByHour) {
+    const day = dayOf(ts)
+    const acc = manualByDay.get(day) || { totalMWh: 0, hours: 0 }
+    acc.totalMWh += mwh
+    acc.hours++
+    manualByDay.set(day, acc)
+  }
 
   for (const entry of log) {
-    let totalMWh = 0
-    let hours = 0
-    for (const [ts, mwh] of manualByHour) {
-      if (ts < entry.ts || ts >= entry.ts + dayMs) continue
-      totalMWh += mwh
-      hours++
-    }
+    const { totalMWh, hours } = manualByDay.get(dayOf(entry.ts)) || { totalMWh: 0, hours: 0 }
     if (!hours) continue
 
     const powerW = (totalMWh / hours) * 1000000

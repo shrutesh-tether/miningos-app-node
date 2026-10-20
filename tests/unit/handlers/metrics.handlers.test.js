@@ -6208,6 +6208,62 @@ test('getConsumption - groupBy miner injects the manual phase group from its log
   t.is(reads[0].end, PHASE_START + 2 * PHASE_DAY_MS - 1)
 })
 
+test('getConsumption - groupBy miner gives each UTC-midnight row the manual hours of its local day', async (t) => {
+  // America/Campo_Grande (UTC-4): local days start at 04:00Z. A 1-3 Aug local request
+  // starts after the 1 Aug 00:00Z row, so the ork returns the 2, 3 and 4 Aug 00:00Z
+  // snapshots - local 1, 2 and 3 Aug at 20:00.
+  const AUG_1_LOCAL = Date.UTC(2026, 7, 1, 4)
+  const rows = [1, 2, 3].map((d) => ({
+    ts: Date.UTC(2026, 7, 1 + d),
+    power_w_type_group_sum_aggr: { 'miner-wm-m63': 4000000 }
+  }))
+  const reads = []
+  const ctx = phaseConsumptionCtx({
+    hashrate: rows,
+    manual: [
+      { ts: AUG_1_LOCAL, totalConsumptionMWh: 0.5 }, // local 1 Aug 00:00
+      { ts: AUG_1_LOCAL + PHASE_DAY_MS + 23 * PHASE_HOUR_MS, totalConsumptionMWh: 0.3 } // local 2 Aug 23:00
+    ],
+    onCall: (method, payload) => { if (method === 'getHistoricalLogs') reads.push(payload) }
+  })
+  ctx.conf.featureConfig.lockedTimezone = 'America/Campo_Grande'
+
+  const res = await getConsumption(ctx, {
+    query: { start: AUG_1_LOCAL, end: AUG_1_LOCAL + 3 * PHASE_DAY_MS - 1, groupBy: 'miner' }
+  })
+
+  t.is(res.log[0].consumptionMWh.HBM, 0.5, 'local 1 Aug 00:00 lands on the row the UI shows as 1 Aug')
+  t.is(res.log[1].consumptionMWh.HBM, 0.3, 'local 2 Aug 23:00 (03:00Z on 3 Aug) stays on 2 Aug')
+  t.absent(res.log[2].powerW.HBM)
+  t.ok(Math.abs(res.summary.groupedBy.HBM.totalConsumptionMWh - 0.8) < 1e-9, 'every logged hour is counted once')
+  t.is(reads[0].start, AUG_1_LOCAL, 'manual hours are read from the first local day')
+  t.is(reads[0].end, AUG_1_LOCAL + 3 * PHASE_DAY_MS - 1, 'through the last local day')
+})
+
+test('getConsumption - groupBy container puts the local-day manual hours under acme-container', async (t) => {
+  // Same UTC-4 case as the miner view: rows at 2-4 Aug 00:00Z are local 1-3 Aug.
+  const AUG_1_LOCAL = Date.UTC(2026, 7, 1, 4)
+  const rows = [1, 2, 3].map((d) => ({
+    ts: Date.UTC(2026, 7, 1 + d),
+    power_w_container_group_sum_aggr: { 'group-1': 500000 }
+  }))
+  const ctx = phaseConsumptionCtx({
+    hashrate: rows,
+    manual: [{ ts: AUG_1_LOCAL, totalConsumptionMWh: 0.5 }]
+  })
+  ctx.conf.featureConfig.lockedTimezone = 'America/Campo_Grande'
+
+  const res = await getConsumption(ctx, {
+    query: { start: AUG_1_LOCAL, end: AUG_1_LOCAL + 3 * PHASE_DAY_MS - 1, groupBy: 'container' }
+  })
+
+  t.is(res.log[0].powerW['group-1'], 500000, 'telemetry containers untouched')
+  t.is(res.log[0].consumptionMWh['acme-container'], 0.5, 'local 1 Aug 00:00 lands on the 1 Aug row')
+  t.is(res.log[0].powerW['acme-container'], 500000)
+  t.absent(res.log[0].powerW.HBM, 'only the container key')
+  t.is(res.summary.groupedBy['acme-container'].totalConsumptionMWh, 0.5)
+})
+
 test('getConsumption - groupBy container injects the container group, phase=total too', async (t) => {
   const ctx = phaseConsumptionCtx({
     hashrate: groupedConsumptionRows('power_w_container_group_sum_aggr', { 'group-1': 500000 }),
