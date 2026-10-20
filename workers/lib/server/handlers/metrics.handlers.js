@@ -970,9 +970,12 @@ async function fetchMeterPowerByHour (ctx, req, meterKey) {
  * Consumption of one phase, built hour by hour and then rolled up like the
  * site series. A `manual` phase is the hourly MWh logged on the DCS worker; a
  * `remainder` phase is its meter minus those manual entries, since the
- * manually logged load is fed through that meter. An elapsed hour missing any
- * input is left out of the series and counted in summary.missingHours rather
- * than read as zero.
+ * manually logged load is fed through that meter. A `remainder` hour with no
+ * manual entry reads that entry as 0 (the meter is still the phase's own load
+ * then) and is counted in summary.manualMissingHours, so the fallback stays
+ * visible. Any other elapsed hour missing an input - no meter value, or no
+ * entry for a `manual` phase - is left out of the series and counted in
+ * summary.missingHours rather than read as zero.
  *
  * The hourly rows are served month by month from a cache: revenue-summary and
  * the efficiency views rebuild this series over their whole window on every
@@ -990,22 +993,29 @@ async function getPhaseConsumption (ctx, req, phase, bucketing) {
 
   const hourly = []
   let missingHours = 0
+  let manualMissingHours = 0
   for (const ts of lPhases.elapsedHourStarts(start, end)) {
     const row = byHour.get(ts)
     if (!row) {
       missingHours++
       continue
     }
-    hourly.push(row)
+    const { manualMissing, ...entry } = row
+    if (manualMissing) manualMissingHours++
+    hourly.push(entry)
   }
 
   const log = isLocalInterval(bucketing.interval) ? rollupLocalConsumption(hourly, bucketing) : hourly
-  return { log, summary: { ...calculateConsumptionSummary(log), missingHours } }
+  const summary = { ...calculateConsumptionSummary(log), missingHours }
+  if (source === lPhases.CONSUMPTION_SOURCES.REMAINDER) summary.manualMissingHours = manualMissingHours
+  return { log, summary }
 }
 
 // One span of the phase's hourly rows, straight from the sources: the hours of
 // [start, end] that have elapsed and carry every input they need (see
-// getPhaseConsumption). Hours missing an input are simply absent.
+// getPhaseConsumption). Hours missing an input are simply absent, except a
+// remainder hour without a manual entry: it subtracts 0 and is flagged
+// manualMissing (kept in the cached row, stripped from the served log).
 async function fetchPhaseHourlyRows (ctx, req, { source, meterKey }, start, end) {
   const spanReq = { ...req, query: { ...req.query, start, end } }
   const [manualByHour, meterByHour] = await Promise.all([
@@ -1016,14 +1026,26 @@ async function fetchPhaseHourlyRows (ctx, req, { source, meterKey }, start, end)
   const rows = []
   for (const ts of lPhases.elapsedHourStarts(start, end)) {
     const manualMWh = manualByHour.get(ts)
-    const meterW = meterByHour ? meterByHour.get(ts) : 0
-    if (manualMWh === undefined || meterW === undefined) continue
-    const consumptionMWh = meterByHour ? meterW / 1000000 - manualMWh : manualMWh
+    if (meterByHour) {
+      const meterW = meterByHour.get(ts)
+      if (meterW === undefined) continue
+      const manualMissing = manualMWh === undefined
+      const consumptionMWh = meterW / 1000000 - (manualMissing ? 0 : manualMWh)
+      rows.push({
+        ts,
+        timeRange: { startTs: ts, endTs: ts + HOUR_MS - 1 },
+        powerW: consumptionMWh * 1000000,
+        consumptionMWh,
+        ...(manualMissing && { manualMissing })
+      })
+      continue
+    }
+    if (manualMWh === undefined) continue
     rows.push({
       ts,
       timeRange: { startTs: ts, endTs: ts + HOUR_MS - 1 },
-      powerW: consumptionMWh * 1000000,
-      consumptionMWh
+      powerW: manualMWh * 1000000,
+      consumptionMWh: manualMWh
     })
   }
   return rows

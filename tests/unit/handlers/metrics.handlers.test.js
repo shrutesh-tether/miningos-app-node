@@ -6105,7 +6105,7 @@ test('getConsumption - remainder phase is its meter minus the manual hours', asy
   t.is(res.summary.totalConsumptionMWh, 6.5)
 })
 
-test('getConsumption - an hour without a manual entry is missing, not zero', async (t) => {
+test('getConsumption - an hour without a manual entry subtracts zero from the remainder, and is missing for the manual phase', async (t) => {
   const ctx = phaseConsumptionCtx({
     meter: [
       { ts: PHASE_START, by_meter_power_w: { 'site-pm': 5000000 } },
@@ -6119,13 +6119,38 @@ test('getConsumption - an hour without a manual entry is missing, not zero', asy
   const query = { start: PHASE_START, end: PHASE_START + 2 * PHASE_HOUR_MS - 1, interval: '1d' }
 
   const remainder = await getConsumption(ctx, { query: { ...query, phase: 'phase1' } })
-  t.is(remainder.log[0].consumptionMWh, 4, 'the unlogged hour is not counted as the full meter')
-  t.is(remainder.log[0].powerW, 4000000, 'nor averaged in as zero')
-  t.is(remainder.summary.missingHours, 1)
+  t.is(remainder.log[0].consumptionMWh, 9, 'the unlogged hour is the full meter')
+  t.is(remainder.log[0].powerW, 4500000)
+  t.is(remainder.summary.missingHours, 0)
+  t.is(remainder.summary.manualMissingHours, 1, 'the zero-filled hour is surfaced')
+
+  const hourly = await getConsumption(ctx, { query: { ...query, interval: '1h', phase: 'phase1' } })
+  t.alike(hourly.log.map(e => e.consumptionMWh), [4, 5])
+  t.ok(hourly.log.every(e => !('manualMissing' in e)), 'the row flag is not served')
 
   const manual = await getConsumption(ctx, { query: { ...query, phase: 'phase1_5' } })
   t.is(manual.summary.totalConsumptionMWh, 1)
   t.is(manual.summary.missingHours, 1)
+  t.is(manual.summary.manualMissingHours, undefined, 'only a remainder phase carries the count')
+})
+
+test('getConsumption - a remainder hour without a meter value is still missing', async (t) => {
+  const ctx = phaseConsumptionCtx({
+    meter: [
+      { ts: PHASE_START, by_meter_power_w: { 'site-pm': 5000000 } }
+    ],
+    manual: [
+      { ts: PHASE_START, totalConsumptionMWh: 1 },
+      { ts: PHASE_START + PHASE_HOUR_MS, totalConsumptionMWh: 1 }
+    ]
+  })
+
+  const res = await getConsumption(ctx, {
+    query: { start: PHASE_START, end: PHASE_START + 2 * PHASE_HOUR_MS - 1, interval: '1h', phase: 'phase1' }
+  })
+  t.alike(res.log.map(e => e.consumptionMWh), [4])
+  t.is(res.summary.missingHours, 1)
+  t.is(res.summary.manualMissingHours, 0)
 })
 
 test('getConsumption - phase rejects groupBy, byMeter and racks, and needs a usable source', async (t) => {
