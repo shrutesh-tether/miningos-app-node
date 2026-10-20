@@ -6033,6 +6033,39 @@ test('getEfficiency - telemetry phase divides site PM minus manual by the fleet 
   t.is(daily.log[0].efficiencyWThs, 3500000 / 150, 'mean power over mean hashrate, like the site series')
 })
 
+test('getEfficiency - telemetry phase counts the full-meter hours it keeps in manualMissingHours', async (t) => {
+  const H = PHASE_HOUR_MS
+  const ctx = phaseConsumptionCtx({
+    meter: [
+      { ts: PHASE_START, by_meter_power_w: { 'site-pm': 5000000 } },
+      { ts: PHASE_START + H, by_meter_power_w: { 'site-pm': 5000000 } },
+      { ts: PHASE_START + 2 * H, by_meter_power_w: { 'site-pm': 5000000 } }
+    ],
+    // no manual entry for the second and third hours
+    manual: [{ ts: PHASE_START, totalConsumptionMWh: 1 }],
+    // the third hour has no hashrate sample, so it is missing rather than full-meter
+    hashrate: [
+      { ts: `${PHASE_START}-${PHASE_START + H - 1}`, hashrate_mhs_5m_sum_aggr: 1e8 },
+      { ts: `${PHASE_START + H}-${PHASE_START + 2 * H - 1}`, hashrate_mhs_5m_sum_aggr: 1e8 }
+    ]
+  })
+  const query = { start: PHASE_START, end: PHASE_START + 3 * H - 1, phase: 'phase1' }
+
+  const hourly = await getEfficiency(ctx, { query: { ...query, interval: '1h' } })
+  t.alike(hourly.log.map(e => e.efficiencyWThs), [4000000 / 100, 5000000 / 100])
+  t.is(hourly.summary.missingHours, 1)
+  t.is(hourly.summary.manualMissingHours, 1, 'only the kept hour is counted')
+
+  const daily = await getEfficiency(ctx, { query: { ...query, interval: '1d' } })
+  t.is(daily.summary.manualMissingHours, 1)
+
+  const consumption = await getConsumption(ctx, { query: { ...query, interval: '1h' } })
+  t.is(consumption.summary.manualMissingHours, 2, 'consumption keeps the hour efficiency drops')
+
+  const poolOnly = await getEfficiency(ctx, { query: { ...query, interval: '1h', phase: 'phase1_5' } })
+  t.is(poolOnly.summary.manualMissingHours, undefined, 'a manual phase carries no count')
+})
+
 test('getEfficiency - total divides site power by miner plus pool-only phase hashrate', async (t) => {
   const H = PHASE_HOUR_MS
   const ctx = phaseCtx(async (key, method, payload) => {

@@ -23,6 +23,7 @@ const {
 } = require('../../constants')
 const {
   localDayStart,
+  nextLocalDayStart,
   safeDiv,
   flattenRpcResults
 } = require('../../utils')
@@ -985,30 +986,36 @@ async function fetchMeterPowerByHour (ctx, req, meterKey) {
  * (energy.handlers), and store-side backfills are repaid by the TTL.
  */
 async function getPhaseConsumption (ctx, req, phase, bucketing) {
+  const { isRemainder, rows, missingHours } = await getPhaseHourly(ctx, req, phase, bucketing)
+
+  let manualMissingHours = 0
+  const hourly = rows.map(({ manualMissing, ...entry }) => {
+    if (manualMissing) manualMissingHours++
+    return entry
+  })
+
+  const log = isLocalInterval(bucketing.interval) ? rollupLocalConsumption(hourly, bucketing) : hourly
+  const summary = { ...calculateConsumptionSummary(log), missingHours }
+  if (isRemainder) summary.manualMissingHours = manualMissingHours
+  return { log, summary }
+}
+
+// The phase's hourly rows over the elapsed hours of [start, end], still carrying
+// the manualMissing flag, and the count of hours left out for a missing input.
+async function getPhaseHourly (ctx, req, phase, { start, end }) {
   const { source, meterKey } = lPhases.getPhaseConsumptionSource(phase)
-  const { start, end } = bucketing
   if (!isCentralDCSEnabled(ctx)) throw new Error('ERR_PHASE_CONSUMPTION_REQUIRES_CENTRAL_DCS')
 
   const byHour = await resolvePhaseHourlyRows(ctx, req, phase, { source, meterKey }, start, end)
 
-  const hourly = []
+  const rows = []
   let missingHours = 0
-  let manualMissingHours = 0
   for (const ts of lPhases.elapsedHourStarts(start, end)) {
     const row = byHour.get(ts)
-    if (!row) {
-      missingHours++
-      continue
-    }
-    const { manualMissing, ...entry } = row
-    if (manualMissing) manualMissingHours++
-    hourly.push(entry)
+    if (row) rows.push(row)
+    else missingHours++
   }
-
-  const log = isLocalInterval(bucketing.interval) ? rollupLocalConsumption(hourly, bucketing) : hourly
-  const summary = { ...calculateConsumptionSummary(log), missingHours }
-  if (source === lPhases.CONSUMPTION_SOURCES.REMAINDER) summary.manualMissingHours = manualMissingHours
-  return { log, summary }
+  return { isRemainder: source === lPhases.CONSUMPTION_SOURCES.REMAINDER, rows, missingHours }
 }
 
 // One span of the phase's hourly rows, straight from the sources: the hours of
@@ -1279,6 +1286,18 @@ const CONSUMPTION_GROUP_FIELDS = {
  * without any logged hour gets no key rather than a zero. The grouped series is
  * miner telemetry only, so the phase's load is not counted twice.
  */
+// The local days (in `timezone`) the rows of a stat-1D log fall on, from the
+// first row's day through the end of the last row's, as an inclusive [start, end].
+// Both synthetic group injections read their phase data over this window, so a
+// row's consumption and its efficiency cover the same hours.
+function localDayWindow (log, timezone) {
+  const tss = log.map((entry) => entry.ts)
+  return {
+    start: localDayStart(Math.min(...tss), timezone),
+    end: nextLocalDayStart(Math.max(...tss), timezone) - 1
+  }
+}
+
 async function injectSyntheticConsumptionGroups (ctx, req, log) {
   if (!log.length) return
   // `total` must list the phase groups exactly like a phase-less request.
@@ -1301,10 +1320,8 @@ async function injectSyntheticConsumptionGroups (ctx, req, log) {
   // local-day request, whose start lies after the UTC midnight row it never reads.
   const timezone = resolveTimezone(ctx, req)
   const dayOf = (ts) => localDayStart(ts, timezone)
-  const firstDay = dayOf(Math.min(...log.map((entry) => entry.ts)))
-  const lastDay = dayOf(Math.max(...log.map((entry) => entry.ts)))
-  const afterLastDay = dayOf(lastDay + 1.5 * METRICS_TIME.ONE_DAY_MS)
-  const manualByHour = await fetchManualConsumptionByHour(ctx, firstDay, afterLastDay - 1)
+  const { start, end } = localDayWindow(log, timezone)
+  const manualByHour = await fetchManualConsumptionByHour(ctx, start, end)
 
   const manualByDay = new Map()
   for (const [ts, mwh] of manualByHour) {
@@ -1586,8 +1603,10 @@ async function getDCSEfficiency (ctx, { key, groupRange, start, end, bucketing }
 async function getPoolOnlyEfficiency (ctx, req, phase, bucketing) {
   const { start, end } = bucketing
   const consumption = await getPhaseConsumption(ctx, req, phase, bucketing)
+  const { missingHours, manualMissingHours } = consumption.summary
+  const gaps = { missingHours, ...(manualMissingHours !== undefined && { manualMissingHours }) }
   if (!consumption.log.length) {
-    return { log: [], summary: { ...calculateEfficiencySummary([]), missingHours: consumption.summary.missingHours } }
+    return { log: [], summary: { ...calculateEfficiencySummary([]), ...gaps } }
   }
 
   const buckets = consumption.log.map(({ ts, timeRange }) => ({ ts, ...timeRange }))
@@ -1599,7 +1618,7 @@ async function getPoolOnlyEfficiency (ctx, req, phase, bucketing) {
     return { ts, timeRange, efficiencyWThs: hashrateThs > 0 ? powerW / hashrateThs : 0 }
   })
 
-  return { log, summary: { ...calculateEfficiencySummary(log), missingHours: consumption.summary.missingHours } }
+  return { log, summary: { ...calculateEfficiencySummary(log), ...gaps } }
 }
 
 /**
@@ -1607,14 +1626,16 @@ async function getPoolOnlyEfficiency (ctx, req, phase, bucketing) {
  * (for a remainder phase, its meter minus the manual entries) over the fleet's
  * miner hashrate, joined hour by hour and then averaged per bucket like the
  * site series. An hour without a hashrate sample is counted in missingHours
- * along with the hours the consumption series already left out.
+ * along with the hours the consumption series already left out. For a
+ * remainder phase, the kept hours whose power is the full meter (no manual
+ * entry) are counted in manualMissingHours, as in the consumption summary.
  */
 async function getTelemetryPhaseEfficiency (ctx, req, phase, bucketing) {
   const { start, end, interval } = bucketing
   const { key, groupRange } = getIntervalConfig('1h')
 
   const [consumption, hashrateRes] = await Promise.all([
-    getPhaseConsumption(ctx, req, phase, { ...bucketing, interval: '1h' }),
+    getPhaseHourly(ctx, req, phase, bucketing),
     ctx.dataProxy.requestData(RPC_METHODS.TAIL_LOG, {
       type: WORKER_TYPES.MINER,
       tag: WORKER_TAGS.MINER,
@@ -1634,14 +1655,16 @@ async function getTelemetryPhaseEfficiency (ctx, req, phase, bucketing) {
     if (Number.isFinite(hashrateMhs)) hashrateByHour.set(parseEntryTs(val.ts), hashrateMhs)
   }
 
-  let missingHours = consumption.summary.missingHours
+  let missingHours = consumption.missingHours
+  let manualMissingHours = 0
   const points = []
-  for (const { ts, timeRange, powerW } of consumption.log) {
+  for (const { ts, timeRange, powerW, manualMissing } of consumption.rows) {
     const hashrateMhs = hashrateByHour.get(ts)
     if (hashrateMhs === undefined) {
       missingHours++
       continue
     }
+    if (manualMissing) manualMissingHours++
     points.push({ ts, timeRange, powerW, hashrateMhs })
   }
 
@@ -1659,7 +1682,9 @@ async function getTelemetryPhaseEfficiency (ctx, req, phase, bucketing) {
     return { ...bucket, efficiencyWThs: hashrateThs > 0 ? powerW / hashrateThs : 0 }
   })
 
-  return { log, summary: { ...calculateEfficiencySummary(log), missingHours } }
+  const summary = { ...calculateEfficiencySummary(log), missingHours }
+  if (consumption.isRemainder) summary.manualMissingHours = manualMissingHours
+  return { log, summary }
 }
 
 function calculateEfficiencySummary (log) {
@@ -1738,15 +1763,9 @@ async function injectSyntheticEfficiencyGroups (ctx, req, log) {
     .filter(({ phase, key }) => key && hasConsumptionSource(phase))
   if (!phases.length) return
 
-  // Same window as injectSyntheticConsumptionGroups: from the first row's local
-  // day through the end of the last row's, so a row's efficiency and its
-  // consumption cover the same hours.
   const timezone = resolveTimezone(ctx, req)
   const dayOf = (ts) => localDayStart(ts, timezone)
-  const firstDay = dayOf(Math.min(...log.map((entry) => entry.ts)))
-  const lastDay = dayOf(Math.max(...log.map((entry) => entry.ts)))
-  const afterLastDay = dayOf(lastDay + 1.5 * METRICS_TIME.ONE_DAY_MS)
-  const bucketing = { interval: '1d', timezone, start: firstDay, end: afterLastDay - 1 }
+  const bucketing = { interval: '1d', timezone, ...localDayWindow(log, timezone) }
   const phaseReq = { ...req, query: { ...req.query, start: bucketing.start, end: bucketing.end } }
 
   const results = await Promise.all(phases.map(({ phase }) => getPoolOnlyEfficiency(ctx, phaseReq, phase, bucketing)))
@@ -3017,7 +3036,7 @@ function aggregateDowntimeDaily (hourlyLog, timezone) {
     .map(([dayTs, hours]) => ({
       ts: dayTs,
       // A local day is 23-25h across a DST shift, so its end is the next day's start.
-      timeRange: { startTs: dayTs, endTs: localDayStart(dayTs + 1.5 * METRICS_TIME.ONE_DAY_MS, timezone) - 1 },
+      timeRange: { startTs: dayTs, endTs: nextLocalDayStart(dayTs, timezone) - 1 },
       powerW: hours.reduce((sum, h) => sum + h.powerW, 0) / hours.length,
       nominalPowerW: hours[0].nominalPowerW,
       downtimeRate: meanOfField(hours, 'downtimeRate'),
