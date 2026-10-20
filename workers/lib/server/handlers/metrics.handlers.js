@@ -1707,9 +1707,78 @@ async function getGroupedEfficiency (ctx, req) {
     return { ts: parseEntryTs(val.ts), efficiencyWThs }
   })
 
+  await injectSyntheticEfficiencyGroups(ctx, req, log)
+
   const summary = calculateGroupedEfficiencySummary(log, groupBy)
 
   return { log, summary }
+}
+
+/**
+ * Adds the configured synthetic group (e.g. the container's miner type) of every
+ * pool-only phase to the grouped efficiency, so the Miner Type / Mining Unit
+ * views list the phase next to the miner-reported groups. Its value is the
+ * phase's own daily efficiency (its consumption over its pool hashrate, see
+ * getPoolOnlyEfficiency), taken per local day like the grouped consumption: a
+ * stat-1D row stamped at UTC midnight reads the site-local day it falls on. A
+ * day without consumption or pool hashrate gets no key rather than a zero.
+ */
+async function injectSyntheticEfficiencyGroups (ctx, req, log) {
+  if (!log.length) return
+  // `total` must list the phase groups exactly like a phase-less request.
+  if (lPhases.resolvePhase(ctx, req)) return
+
+  const groupBy = req.query.groupBy
+  if (groupBy !== 'miner' && groupBy !== 'container') return
+  // The phase consumption series exists only on central-DCS sites.
+  if (!isCentralDCSEnabled(ctx)) return
+
+  const phases = lPhases.getPoolOnlyPhases(ctx)
+    .map((phase) => ({ phase, key: groupBy === 'miner' ? phase.groups?.minerType : phase.groups?.container }))
+    .filter(({ phase, key }) => key && hasConsumptionSource(phase))
+  if (!phases.length) return
+
+  // Same window as injectSyntheticConsumptionGroups: from the first row's local
+  // day through the end of the last row's, so a row's efficiency and its
+  // consumption cover the same hours.
+  const timezone = resolveTimezone(ctx, req)
+  const dayOf = (ts) => localDayStart(ts, timezone)
+  const firstDay = dayOf(Math.min(...log.map((entry) => entry.ts)))
+  const lastDay = dayOf(Math.max(...log.map((entry) => entry.ts)))
+  const afterLastDay = dayOf(lastDay + 1.5 * METRICS_TIME.ONE_DAY_MS)
+  const bucketing = { interval: '1d', timezone, start: firstDay, end: afterLastDay - 1 }
+  const phaseReq = { ...req, query: { ...req.query, start: bucketing.start, end: bucketing.end } }
+
+  const results = await Promise.all(phases.map(({ phase }) => getPoolOnlyEfficiency(ctx, phaseReq, phase, bucketing)))
+
+  for (const [i, { key }] of phases.entries()) {
+    const byDay = new Map()
+    for (const { ts, efficiencyWThs } of results[i].log) {
+      if (Number.isFinite(efficiencyWThs) && efficiencyWThs > 0) byDay.set(dayOf(ts), efficiencyWThs)
+    }
+
+    for (const entry of log) {
+      const efficiencyWThs = byDay.get(dayOf(entry.ts))
+      if (efficiencyWThs === undefined) continue
+      // Copy: the map can be shared with the worker response
+      entry.efficiencyWThs = entry.efficiencyWThs && typeof entry.efficiencyWThs === 'object'
+        ? { ...entry.efficiencyWThs }
+        : {}
+      // A synthetic key colliding with a real device-type key is a config error;
+      // losing telemetry to the overwrite would be worse than the group going missing.
+      if (entry.efficiencyWThs[key] !== undefined) continue
+      entry.efficiencyWThs[key] = efficiencyWThs
+    }
+  }
+}
+
+function hasConsumptionSource (phase) {
+  try {
+    lPhases.getPhaseConsumptionSource(phase)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function calculateGroupedEfficiencySummary (log, groupBy) {
