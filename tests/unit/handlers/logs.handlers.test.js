@@ -406,3 +406,32 @@ test('tailLogRoute - allows a long range when the client bounds it with a limit'
 
   t.pass()
 })
+
+test('log routes - fields keep only inclusion entries', async (t) => {
+  const payloads = {}
+  const mockCtx = createMockCtxWithOrks(
+    [{ rpcPublicKey: 'key1' }],
+    async (key, method, query) => {
+      payloads[method] = query
+      return []
+    }
+  )
+  const fields = JSON.stringify({ ts: 1, info: '$$ROOT', '__proto__.limit': 'x' })
+
+  await tailLogRoute(mockCtx, { query: { key: 'stat-5m', limit: 10, fields } }, {})
+  t.alike(payloads.tailLog.fields, { ts: 1 }, 'tail-log drops expression values')
+
+  await getHistoryLogRoute(mockCtx, { query: { fields: JSON.stringify({ info: '$opts.password' }) } })
+  t.absent(payloads.getHistoricalLogs.fields, 'history-log drops a projection with no inclusion entries')
+
+  await tailLogMultiRoute(mockCtx, {
+    query: { limit: 10, fields, keys: JSON.stringify([{ type: 'miner', key: 'stat-5m', fields: { ts: 1, x: '$opts' } }]) }
+  }, {})
+  t.alike(payloads.tailLogMulti.fields, { ts: 1 }, 'tail-log-multi drops expression values')
+  t.alike(payloads.tailLogMulti.keys[0].fields, { ts: 1 }, 'tail-log-multi sanitizes per-key projections')
+
+  await tailLogRangeAggrRoute(mockCtx, { query: { keys: [{ type: 'miner', fields: { x: '$$ROOT' } }] } }, {})
+  t.absent(payloads.tailLogCustomRangeAggr.keys[0].fields, 'range-aggr sanitizes per-key projections')
+
+  t.is({}.limit, undefined, 'Object.prototype is untouched')
+})

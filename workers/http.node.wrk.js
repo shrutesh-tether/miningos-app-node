@@ -15,7 +15,7 @@ const { AlertsService } = require('./lib/alerts')
 const { auditLogger } = require('./lib/server/lib/auditLogger')
 const { sweepExpired } = require('./lib/server/lib/cachedRoute')
 const { createDataProxy } = require('./lib/data.proxy')
-const { AUTH_CACHE_TTL } = require('./lib/constants')
+const { AUTH_CACHE_TTL, TRUSTED_PROXIES_DEFAULT } = require('./lib/constants')
 const LogDownloader = require('./lib/log-downloader')
 
 class WrkServerHttp extends TetherWrkBase {
@@ -65,7 +65,7 @@ class WrkServerHttp extends TetherWrkBase {
         port: this.ctx.port,
         logger: true,
         addDefaultRoutes: true,
-        trustProxy: true
+        trustProxy: this.conf.trustProxy ?? TRUSTED_PROXIES_DEFAULT
       }, 0],
       ['fac', '@tetherto/svc-facs-httpd-oauth2', 'h0', 'h0', {}, 0],
       ['fac', '@tetherto/svc-facs-httpd-oauth2', 'h1', 'h1', {}, 0],
@@ -174,7 +174,6 @@ class WrkServerHttp extends TetherWrkBase {
         await httpd.startServer()
 
         if (!this.noAuth) {
-          await this.authLib.migrateUsers(httpdAuth)
           await this.authLib.start()
         }
 

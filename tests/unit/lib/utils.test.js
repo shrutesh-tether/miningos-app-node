@@ -39,95 +39,42 @@ test('dateNowSec - returns current timestamp in seconds', (t) => {
   t.pass()
 })
 
-test('extractIps - with x-forwarded-for header', (t) => {
+test('extractIps - ignores a client-written x-forwarded-for header', (t) => {
   const req = {
-    headers: {
-      'x-forwarded-for': `${TEST_IPS.PRIVATE_1}, ${TEST_IPS.PRIVATE_2}, ${TEST_IPS.PRIVATE_3}`
-    }
+    headers: { 'x-forwarded-for': `${TEST_IPS.PRIVATE_1}, ${TEST_IPS.PRIVATE_2}` },
+    socket: { remoteAddress: TEST_IPS.PRIVATE_5 }
   }
 
-  const result = extractIps(req)
-
-  t.ok(Array.isArray(result), 'should return array')
-  t.is(result.length, 3, 'should return 3 IPs')
-  t.ok(result.includes(TEST_IPS.PRIVATE_1), 'should include first IP')
-  t.ok(result.includes(TEST_IPS.PRIVATE_2), 'should include second IP')
-  t.ok(result.includes(TEST_IPS.PRIVATE_3), 'should include third IP')
-
-  t.pass()
+  t.alike(extractIps(req), [TEST_IPS.PRIVATE_5], 'should use only the connecting address')
 })
 
-test('extractIps - with req.ip', (t) => {
+test('extractIps - uses the proxy-resolved req.ip', (t) => {
   const req = {
+    headers: { 'x-forwarded-for': `${TEST_IPS.PRIVATE_1}, ${TEST_IPS.PRIVATE_4}` },
     ip: TEST_IPS.PRIVATE_4,
-    headers: {}
+    ips: [TEST_IPS.PRIVATE_5, TEST_IPS.PRIVATE_4],
+    socket: { remoteAddress: TEST_IPS.PRIVATE_5 }
   }
 
-  const result = extractIps(req)
-
-  t.ok(Array.isArray(result), 'should return array')
-  t.is(result.length, 1, 'should return 1 IP')
-  t.ok(result.includes(TEST_IPS.PRIVATE_4), 'should include req.ip')
-
-  t.pass()
+  t.alike(extractIps(req), [TEST_IPS.PRIVATE_4], 'should return only req.ip')
 })
 
-test('extractIps - with req.ips', (t) => {
-  const req = {
-    ips: [TEST_IPS.PRIVATE_1, TEST_IPS.PRIVATE_2],
-    headers: {}
+test('extractIps - resolves the client behind nginx and Cloudflare, not a spoofed entry', (t) => {
+  const proxyaddr = require('@fastify/proxy-addr')
+  const { TRUSTED_PROXIES_DEFAULT } = require('../../../workers/lib/constants')
+  const trust = proxyaddr.compile(TRUSTED_PROXIES_DEFAULT)
+  const viaProxies = (xff) => {
+    const raw = { socket: { remoteAddress: '127.0.0.1' }, headers: { 'x-forwarded-for': xff } }
+    return { ...raw, ip: proxyaddr(raw, trust) }
   }
 
-  const result = extractIps(req)
+  // client 9.9.9.9 claims 1.2.3.4; Cloudflare appends the client, nginx appends the edge
+  t.alike(extractIps(viaProxies('1.2.3.4, 9.9.9.9, 173.245.48.5')), ['9.9.9.9'])
+  // nginx real_ip style, where nginx appends the already-resolved client
+  t.alike(extractIps(viaProxies('1.2.3.4, 9.9.9.9')), ['9.9.9.9'])
 
-  t.ok(Array.isArray(result), 'should return array')
-  t.is(result.length, 2, 'should return 2 IPs')
-  t.ok(result.includes(TEST_IPS.PRIVATE_1), 'should include first IP')
-  t.ok(result.includes(TEST_IPS.PRIVATE_2), 'should include second IP')
-
-  t.pass()
-})
-
-test('extractIps - with socket.remoteAddress', (t) => {
-  const req = {
-    socket: {
-      remoteAddress: TEST_IPS.PRIVATE_5
-    },
-    headers: {}
-  }
-
-  const result = extractIps(req)
-
-  t.ok(Array.isArray(result), 'should return array')
-  t.is(result.length, 1, 'should return 1 IP')
-  t.ok(result.includes(TEST_IPS.PRIVATE_5), 'should include socket.remoteAddress')
-
-  t.pass()
-})
-
-test('extractIps - with multiple sources', (t) => {
-  const req = {
-    headers: {
-      'x-forwarded-for': `${TEST_IPS.PRIVATE_1}, ${TEST_IPS.PRIVATE_2}`
-    },
-    ip: TEST_IPS.PRIVATE_4,
-    ips: [TEST_IPS.PRIVATE_3],
-    socket: {
-      remoteAddress: TEST_IPS.PRIVATE_5
-    }
-  }
-
-  const result = extractIps(req)
-
-  t.ok(Array.isArray(result), 'should return array')
-  t.is(result.length, 5, 'should return 5 unique IPs')
-  t.ok(result.includes(TEST_IPS.PRIVATE_1), 'should include x-forwarded-for IPs')
-  t.ok(result.includes(TEST_IPS.PRIVATE_2), 'should include x-forwarded-for IPs')
-  t.ok(result.includes(TEST_IPS.PRIVATE_4), 'should include req.ip')
-  t.ok(result.includes(TEST_IPS.PRIVATE_3), 'should include req.ips')
-  t.ok(result.includes(TEST_IPS.PRIVATE_5), 'should include socket.remoteAddress')
-
-  t.pass()
+  const direct = { socket: { remoteAddress: '6.6.6.6' }, headers: { 'x-forwarded-for': '1.2.3.4' } }
+  t.alike(extractIps({ ...direct, ip: proxyaddr(direct, trust) }), ['6.6.6.6'], 'a request bypassing the proxies keeps its own address')
 })
 
 test('extractIps - with no IP sources throws error', (t) => {

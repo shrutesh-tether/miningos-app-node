@@ -7,32 +7,16 @@ const { getStartOfDay, localDayStart, nextLocalDayStart, localWeekStart } = requ
 
 const dateNowSec = () => Math.floor(Date.now() / 1000)
 
+// Fastify resolves req.ip by walking X-Forwarded-For from the right and stopping at the first hop outside
+// trustProxy, so it is the address the last trusted proxy saw. The raw header is never read: its entries
+// are written by the client and would satisfy any token's ip binding.
 const extractIps = (req) => {
-  const ips = new Set()
-
-  if (req.headers['x-forwarded-for']) {
-    req.headers['x-forwarded-for'].split(',').forEach(ip => {
-      ips.add(ip.trim())
-    })
-  }
-
-  if (req.ip) {
-    ips.add(req.ip)
-  }
-
-  if (req.ips) {
-    req.ips.map(ip => ips.add(ip))
-  }
-
-  if (req.socket?.remoteAddress) {
-    ips.add(req.socket.remoteAddress)
-  }
-
-  if (!ips.size) {
+  const ip = req.ip || req.socket?.remoteAddress
+  if (!ip) {
     throw new Error('ERR_IP_RESOLVE_FAIL')
   }
 
-  return Array.from(ips.values())
+  return [ip]
 }
 
 const isValidJsonObject = (data) => {

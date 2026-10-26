@@ -1,6 +1,6 @@
 'use strict'
 
-const { parseJsonQueryParam } = require('../../utils')
+const { parseJsonQueryParam, sanitizeIncludeFields } = require('../../utils')
 const { assertSafeMongoQuery } = require('../lib/queryUtils')
 const {
   TAIL_LOG_MAX_ROWS,
@@ -43,7 +43,7 @@ const assertRangeWithinRowLimit = (key, start, end, limit) => {
 
 async function tailLogRoute (ctx, req, rep) {
   if (req.query.fields) {
-    req.query.fields = parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')
+    req.query.fields = sanitizeIncludeFields(parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')) || undefined
   }
 
   if (req.query.aggrFields) {
@@ -70,10 +70,15 @@ async function tailLogMultiRoute (ctx, req, rep) {
     if (!Array.isArray(req.query.keys)) {
       throw new Error('ERR_KEYS_INVALID_ARRAY')
     }
+
+    // Each key is spread into the per-key tailLog request, so its own projection needs the same treatment
+    for (const key of req.query.keys) {
+      if (key?.fields) key.fields = sanitizeIncludeFields(key.fields) || undefined
+    }
   }
 
   if (req.query.fields) {
-    req.query.fields = parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')
+    req.query.fields = sanitizeIncludeFields(parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')) || undefined
   }
 
   if (req.query.aggrFields) {
@@ -96,12 +101,16 @@ async function tailLogMultiRoute (ctx, req, rep) {
 }
 
 async function tailLogRangeAggrRoute (ctx, req, rep) {
+  for (const key of req.query.keys || []) {
+    if (key?.fields) key.fields = sanitizeIncludeFields(key.fields) || undefined
+  }
+
   return await ctx.dataProxy.requestData('tailLogCustomRangeAggr', req.query)
 }
 
 async function getHistoryLogRoute (ctx, req) {
   if (req.query.fields) {
-    req.query.fields = parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')
+    req.query.fields = sanitizeIncludeFields(parseJsonQueryParam(req.query.fields, 'ERR_FIELDS_INVALID_JSON')) || undefined
   }
   if (req.query.query) {
     req.query.query = parseJsonQueryParam(req.query.query, 'ERR_QUERY_INVALID_JSON')

@@ -89,8 +89,7 @@ test('auth routes - Google callback redirects with token', async (t) => {
   }
 
   await oauthRoute.handler({}, rep)
-  t.ok(redirectUrl.includes('http://localhost:3000/callback?'), 'should redirect to UI callback URI')
-  t.ok(redirectUrl.includes('authToken=google-token'), 'should include auth token in querystring')
+  t.is(redirectUrl, 'http://localhost:3000/callback?authToken=google-token', 'should carry the token in the querystring')
   t.pass()
 })
 
@@ -121,8 +120,7 @@ test('auth routes - Microsoft callback redirects with error', async (t) => {
   }
 
   await oauthRoute.handler({}, rep)
-  t.ok(redirectUrl.includes('http://localhost:3000/ms-callback?'), 'should redirect to microsoft UI callback URI')
-  t.ok(redirectUrl.includes('error=ERR_MICROSOFT_AUTH'), 'should include error in querystring')
+  t.is(redirectUrl, 'http://localhost:3000/ms-callback?error=ERR_AUTH_FAIL', 'should report every failure as the same generic error')
 
   t.pass()
 })
@@ -160,10 +158,11 @@ const buildExtDataTestCtx = () => {
       set: (key, value) => cache.set(key, value)
     },
     queuedRequests: new Map(),
+    authLib: { tokenHasPerms: async () => state.canSeeRevenue ?? true },
     dataProxy: {
       requestDataMap: async () => {
         state.handlerCalls++
-        return [[{ ts: state.handlerCalls }]]
+        return state.response ?? [[{ ts: state.handlerCalls }]]
       }
     }
   }
@@ -207,4 +206,24 @@ test('auth routes - ext-data still caches un-ranged queries', async (t) => {
   t.is(cache.size, 1, 'should store the response once')
   t.alike(repB.sent, repA.sent, 'should return the cached payload')
   t.pass()
+})
+
+test('auth routes - ext-data redacts pool balances after the cache', async (t) => {
+  const { ctx, cache, state } = buildExtDataTestCtx()
+  state.response = [{ stats: [{ username: 'acct1', hashrate: 5, balance: 1.2, unsettled: 0.3 }] }]
+  const routes = require('../../../workers/lib/server/routes/auth.routes.js')(ctx)
+  const extDataRoute = routes.find(r => r.url === '/auth/ext-data')
+  const req = () => ({ query: { type: 'minerpool', query: JSON.stringify({ key: 'stats' }) }, _info: { authToken: 't' } })
+
+  state.canSeeRevenue = false
+  const denied = buildRep()
+  await extDataRoute.handler(req(), denied)
+  t.alike(denied.sent, [{ stats: [{ username: 'acct1', hashrate: 5 }] }], 'caller without revenue gets no balances')
+
+  state.canSeeRevenue = true
+  const allowed = buildRep()
+  await extDataRoute.handler(req(), allowed)
+  t.is(allowed.sent[0].stats[0].balance, 1.2, 'revenue holder gets the cached balances intact')
+  t.is(state.handlerCalls, 1, 'both callers share one cached entry')
+  t.is(cache.size, 1)
 })

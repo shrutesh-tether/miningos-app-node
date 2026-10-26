@@ -9,11 +9,15 @@ const {
   getUserInfo,
   newAuthToken,
   getUserPermissions,
-  extDataRoute
+  extDataRoute,
+  redactExtData
 } = require('../handlers/auth.handlers')
-const { createAuthRoute, createCachedAuthRoute, AUTH_ONLY } = require('../lib/routeHelpers')
+const { createAuthRoute, createAuthOnRequest, AUTH_ONLY } = require('../lib/routeHelpers')
+const { cachedRoute } = require('../lib/cachedRoute')
+const { send200 } = require('../lib/send200')
 
-// The payout ledger is revenue data; every other ext-data read is shown to all roles.
+// The payout ledger is revenue data; every other ext-data read is shown to all roles, with pool balances
+// stripped for callers without revenue (see redactExtData).
 const extDataPerms = (req) => {
   try {
     return JSON.parse(req.query.query).key === 'transactions' ? [AUTH_PERMISSIONS.REVENUE] : AUTH_ONLY
@@ -36,39 +40,30 @@ function extDataCacheKey (req) {
   return ['ext-data', req.query.type, req.query.query]
 }
 
+// Every failure reads the same so the callback cannot be used to probe which addresses are provisioned.
+async function oauthCallbackRedirect (ctx, provider, req, uiUri) {
+  try {
+    const token = await ctx.auth_a0.authCallbackHandler(provider, req)
+    return uiUri + '?' + new URLSearchParams({ authToken: token })
+  } catch (err) {
+    console.error(new Date().toISOString(), `ERR_OAUTH_CALLBACK_${provider.toUpperCase()}`, err.message)
+    return uiUri + '?' + new URLSearchParams({ error: 'ERR_AUTH_FAIL' })
+  }
+}
+
 module.exports = (ctx) => [
   {
     method: HTTP_METHODS.GET,
     url: ENDPOINTS.OAUTH_GOOGLE_CALLBACK,
     handler: async (req, rep) => {
-      const qs = new URLSearchParams()
-
-      try {
-        const token = await ctx.auth_a0.authCallbackHandler('google', req)
-        qs.set('authToken', token)
-      } catch (err) {
-        qs.set('error', err.message)
-      }
-
-      const redirectUri = ctx.httpdOauth2_h0.callbackUriUI() + '?' + qs.toString()
-      return rep.redirect(redirectUri)
+      return rep.redirect(await oauthCallbackRedirect(ctx, 'google', req, ctx.httpdOauth2_h0.callbackUriUI()))
     }
   },
   {
     method: HTTP_METHODS.GET,
     url: ENDPOINTS.OAUTH_MICROSOFT_CALLBACK,
     handler: async (req, rep) => {
-      const qs = new URLSearchParams()
-
-      try {
-        const token = await ctx.auth_a0.authCallbackHandler('microsoft', req)
-        qs.set('authToken', token)
-      } catch (err) {
-        qs.set('error', err.message)
-      }
-
-      const redirectUri = ctx.httpdOauth2_h1?.callbackUriUI?.() + '?' + qs.toString()
-      return rep.redirect(redirectUri)
+      return rep.redirect(await oauthCallbackRedirect(ctx, 'microsoft', req, ctx.httpdOauth2_h1?.callbackUriUI?.()))
     }
   },
   {
@@ -100,12 +95,15 @@ module.exports = (ctx) => [
         required: ['type']
       }
     },
-    ...createCachedAuthRoute(
-      ctx,
-      extDataCacheKey,
-      ENDPOINTS.EXT_DATA,
-      extDataRoute,
-      extDataPerms
-    )
+    onRequest: createAuthOnRequest(ctx, extDataPerms),
+    // The cache holds full pool stats; balance fields are dropped per caller after it.
+    handler: async (req, rep) => {
+      const key = extDataCacheKey(req)
+      const load = () => extDataRoute(ctx, req, rep)
+      const results = key
+        ? await cachedRoute(ctx, key, ENDPOINTS.EXT_DATA, load, !!req.query.overwriteCache)
+        : await load()
+      return send200(rep, await redactExtData(ctx, req, results))
+    }
   }
 ]

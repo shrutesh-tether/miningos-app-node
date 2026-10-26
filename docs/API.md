@@ -46,7 +46,7 @@ Other routes don't use it and ignore it.
 
 **Google OAuth2 callback handler** (auto-redirect from Google)
 
-**Response:** Redirects to UI with `?authToken=...` or `?error=...`
+**Response:** Redirects to UI with `?authToken=...` or `?error=ERR_AUTH_FAIL` for any failure; the specific reason is logged server-side
 
 ---
 

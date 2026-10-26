@@ -54,13 +54,15 @@ test('Api', { timeout: 90000 }, async (main) => {
     const netConf = { r0: {} }
     const httpdConf = { h0: {} }
     const httpdOauthConf = {
-      h0: { method: 'google', credentials: { client: { id: 'i', secret: 's' } }, users: [{ email: readonlyUser }, { email: tokenExpiredUser }, { email: siteOperatorUser, write: true }] },
-      h1: { method: 'microsoft', credentials: { client: { id: 'i', secret: 's' }, tenant: 'test-tenant' }, users: [] }
+      h0: { method: 'google', credentials: { client: { id: 'i', secret: 's' } } },
+      h1: { method: 'microsoft', credentials: { client: { id: 'i', secret: 's' }, tenant: 'test-tenant' } }
     }
     const authConf = JSON.parse(
       fs.readFileSync(path.join(__dirname, '../../config/facs/auth.config.json.example'), 'utf8')
     )
-    superadminUser = authConf.a0.superAdmin
+    // The example ships no super admin, so the suite seeds its own
+    superadminUser = 'superadmin@localhost'
+    authConf.a0.superAdmin = superadminUser
 
     fs.writeFileSync(`./${baseDir}/config/common.json`, JSON.stringify(commonConf))
     fs.writeFileSync(`./${baseDir}/config/facs/net.config.json`, JSON.stringify(netConf))
@@ -306,11 +308,9 @@ test('Api', { timeout: 90000 }, async (main) => {
   await sleep(2000)
   await createUser(admin1, 'admin')
   await createUser(admin2, 'admin')
-  // Startup migrates every oauth-config user as read_only_user; routes now require explicit
-  // permissions, so the operator needs its real role. Not via /auth/users: its schema
-  // rejects the TLD-less test address.
-  const operator = await worker.worker.auth_a0.getUserByEmail(siteOperatorUser)
-  await worker.worker.auth_a0.deleteUser(operator.id)
+  // Not via /auth/users: its schema rejects the TLD-less test addresses.
+  await worker.worker.auth_a0.createUser({ email: readonlyUser, roles: ['read_only_user'] })
+  await worker.worker.auth_a0.createUser({ email: tokenExpiredUser, roles: ['read_only_user'] })
   await worker.worker.auth_a0.createUser({ email: siteOperatorUser, roles: ['site_operator'] })
 
   const minersApi = `${appNodeBaseUrl}${ENDPOINTS.MINERS}`

@@ -20,6 +20,17 @@ const DANGEROUS_OPERATORS = new Set([
   '$jsonSchema', '$text', '$code', '$javascript'
 ])
 
+// Device credentials live under opts and the live driver under ctrl; filtering or sorting on them is a blind
+// oracle for the secret. Only the connection fields the listings already return may be queried. The racks
+// enforce the same rule; this fails the request before it fans out.
+const QUERYABLE_OPTS_PATHS = new Set(['opts.address', 'opts.port', 'opts.containerId'])
+
+function isSecretThingPath (path) {
+  const root = path.split('.')[0]
+  if (root === 'ctrl') return true
+  return root === 'opts' && !QUERYABLE_OPTS_PATHS.has(path)
+}
+
 function escapeRegex (s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -42,6 +53,9 @@ function assertSafeMongoQuery (value) {
       throw new Error('ERR_INVALID_FILTER')
     }
     if (key.startsWith('$') && !LOGICAL_OPERATORS.has(key) && !MONGO_OPERATORS.has(key)) {
+      throw new Error('ERR_INVALID_FILTER')
+    }
+    if (!key.startsWith('$') && isSecretThingPath(key)) {
       throw new Error('ERR_INVALID_FILTER')
     }
     assertSafeMongoQuery(child)
@@ -116,8 +130,9 @@ function mapSortFields (sort, fieldMap) {
   if (!sort || typeof sort !== 'object') return sort
   const mapped = {}
   for (const [key, value] of Object.entries(sort)) {
-    if (key.startsWith('$')) throw new Error('ERR_INVALID_FILTER')
-    mapped[fieldMap[key] || key] = value
+    const path = fieldMap[key] || key
+    if (key.startsWith('$') || isSecretThingPath(path)) throw new Error('ERR_INVALID_FILTER')
+    mapped[path] = value
   }
   return mapped
 }

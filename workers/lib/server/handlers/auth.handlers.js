@@ -2,13 +2,15 @@
 
 const gLibUtilBase = require('@bitfinex/lib-js-util-base')
 const { parseJsonQueryParam, getAuthTokenFromHeaders } = require('../../utils')
+const { AUTH_PERMISSIONS, POOL_REVENUE_FIELDS } = require('../../constants')
 
 async function getUserInfo (ctx, req) {
   return req._info.user
 }
 
 async function newAuthToken (ctx, req) {
-  const opts = gLibUtilBase.pick(req.body, ['ips', 'ttl', 'pfx', 'scope', 'roles'])
+  // ips are left out so the new token keeps the old one's binding rather than one the caller picks
+  const opts = gLibUtilBase.pick(req.body, ['ttl', 'pfx', 'scope', 'roles'])
   opts.oldToken = getAuthTokenFromHeaders(req.headers)
   if (!opts.ttl && ctx.conf.ttl) opts.ttl = ctx.conf.ttl
   return ctx.authLib.regenerateToken(opts)
@@ -30,10 +32,29 @@ async function extDataRoute (ctx, req, rep) {
   return await ctx.dataProxy.requestDataMap('getWrkExtData', req.query)
 }
 
+// Pool balances sit inside otherwise role-neutral stats, so they are dropped per caller on a copy,
+// never on the cached entries themselves.
+function omitPoolRevenueFields (entry) {
+  if (Array.isArray(entry)) return entry.map(omitPoolRevenueFields)
+  if (!entry || typeof entry !== 'object') return entry
+  const rest = {}
+  for (const [key, value] of Object.entries(entry)) {
+    if (!POOL_REVENUE_FIELDS.includes(key)) rest[key] = omitPoolRevenueFields(value)
+  }
+  return rest
+}
+
+async function redactExtData (ctx, req, results) {
+  if (ctx.noAuth) return results
+  const canSeeRevenue = await ctx.authLib.tokenHasPerms(req._info?.authToken, false, [AUTH_PERMISSIONS.REVENUE])
+  return canSeeRevenue ? results : omitPoolRevenueFields(results)
+}
+
 module.exports = {
   getUserInfo,
   newAuthToken,
   getUserPermissions,
   getSiteName,
-  extDataRoute
+  extDataRoute,
+  redactExtData
 }

@@ -1,5 +1,4 @@
 'use strict'
-const { SUPER_ADMIN_ID, MIGRATED_USER_ROLES } = require('./constants')
 
 class AuthLib {
   constructor ({ httpc, httpd, userService, auth, microsoftTenant }) {
@@ -14,35 +13,6 @@ class AuthLib {
     const [key, required] = perm.split(':')
     const av = perms.find(p => p.startsWith(`${key}:`))?.split(':')[1] ?? ''
     return [...required].every(c => av.includes(c))
-  }
-
-  async migrateUsers (httpdAuth) {
-    if (await this._userService.hasCreatedUsers()) {
-      return
-    }
-
-    const users = await this._auth.listUsers()
-
-    try {
-      const oldUsers = httpdAuth.conf.users || []
-
-      const superAdmin = users.find(user => user.id.toString() === SUPER_ADMIN_ID)
-
-      await Promise.all(oldUsers.map(async oldUser => {
-        if (oldUser.email === superAdmin.email) {
-          return // Skip super admin
-        }
-
-        try {
-          await this._userService.createUser({ email: oldUser.email, role: MIGRATED_USER_ROLES.READ_ONLY })
-        } catch (error) {
-          console.error('ERR_MIGRATE_USER', error)
-        }
-      }))
-    } catch (error) {
-      console.error('Unexpected error occurred during migration. Migration Failed!', error)
-      throw error
-    }
   }
 
   async start () {

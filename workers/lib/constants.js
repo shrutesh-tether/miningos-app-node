@@ -22,10 +22,6 @@ const USER_SETTINGS_TYPE = 'userSettings'
 const SUPER_ADMIN_ID = '1'
 const SUPER_ADMIN_ROLE = '*'
 
-const MIGRATED_USER_ROLES = {
-  READ_ONLY: 'read_only_user'
-}
-
 const AUTH_PERMISSIONS = {
   MINER: 'miner',
   CONTAINER: 'container',
@@ -58,6 +54,10 @@ const AUTH_PERMISSIONS = {
 
 // Ork global config keys served only to callers with the revenue permission.
 const REVENUE_ONLY_CONFIG_KEYS = ['capexUsd', 'phaseCapexUsd']
+
+// Pool account money in minerpool ext-data (stats, stats-history and the raw data keys), served only to
+// callers with the revenue permission.
+const POOL_REVENUE_FIELDS = ['balance', 'unsettled', 'revenue_24h', 'estimated_today_income', 'yearlyBalances']
 
 const WORK_ORDER_THING_TYPE = 'inventory-work_order'
 
@@ -935,6 +935,18 @@ const TAIL_LOG_UNBUCKETED_KEYS = new Set(['stat-rtd'])
 
 const AUTH_CACHE_TTL = 60 * 1000
 
+// Hops whose X-Forwarded-For entries are believed when resolving the client address: the nginx on this
+// host and Cloudflare's edge (https://www.cloudflare.com/ips). Override with `trustProxy` in common.json
+// when the gateway sits behind something else.
+const TRUSTED_PROXIES_DEFAULT = [
+  'loopback',
+  '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+  '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+  '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+  '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+  '2a06:98c0::/29', '2c0f:f248::/32'
+]
+
 const ACTIONS_MAX_QUERIES = 10
 const ACTIONS_QUERIES_MAX_LENGTH = 1000
 
@@ -1461,10 +1473,10 @@ module.exports = {
   GLOBAL_DATA_TYPES,
   LCOE_SOURCES,
   SUPER_ADMIN_ID,
-  MIGRATED_USER_ROLES,
   COMMENT_ACTION,
   AUTH_PERMISSIONS,
   REVENUE_ONLY_CONFIG_KEYS,
+  POOL_REVENUE_FIELDS,
   AUTH_LEVELS,
   AUTH_CAPS,
   ENDPOINTS,
@@ -1487,6 +1499,7 @@ module.exports = {
   TAIL_LOG_BUCKET_MS,
   TAIL_LOG_UNBUCKETED_KEYS,
   AUTH_CACHE_TTL,
+  TRUSTED_PROXIES_DEFAULT,
   ACTIONS_MAX_QUERIES,
   ACTIONS_QUERIES_MAX_LENGTH,
   USER_SETTINGS_TYPE,
