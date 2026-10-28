@@ -233,9 +233,9 @@ test('authCheck - unambiguous cache key: a token/ips pair that collided under pl
   // Old key: `${token}:${ips.join(',')}` === 'admin:1.2.3.4:5.6.7.8'
   const victimReq = {
     headers: {
-      authorization: 'Bearer admin:1.2.3.4',
-      'x-forwarded-for': '5.6.7.8'
+      authorization: 'Bearer admin:1.2.3.4'
     },
+    ip: '5.6.7.8',
     _info: {}
   }
   await authCheck(mockCtx, victimReq, {})
@@ -248,9 +248,9 @@ test('authCheck - unambiguous cache key: a token/ips pair that collided under pl
   // to the victim's old key above, despite a completely different token.
   const attackerReq = {
     headers: {
-      authorization: 'Bearer admin', // attacker does not know the real superadmin token
-      'x-forwarded-for': '1.2.3.4:5.6.7.8' // crafted single hop containing a colon
+      authorization: 'Bearer admin' // attacker does not know the real superadmin token
     },
+    ip: '1.2.3.4:5.6.7.8', // a crafted address containing a colon
     _info: {}
   }
   await authCheck(mockCtx, attackerReq, {})

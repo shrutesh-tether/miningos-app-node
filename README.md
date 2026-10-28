@@ -122,6 +122,7 @@ Edit `config/common.json`:
 - **`staticRootPath`**: Path to the UI build directory (required if serving frontend)
 - **`cacheTiming`**: Per-endpoint cache TTL values (available: "10s", "15s", "30s", "15m")
 - **`featureConfig`**: Feature flags (see `config/common.json.example` for all available options)
+- **`trustProxy`**: Proxies whose `X-Forwarded-For` entries are believed when resolving the client address that tokens are bound to (default: loopback plus Cloudflare's published ranges, for Cloudflare → nginx on the same host → app-node). nginx must append rather than overwrite the header (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Set `trustProxy: true` in `config/facs/auth.config.json` as well so logins bind tokens to the same address
 
 #### 2. OAuth2 Configuration
 
@@ -136,16 +137,12 @@ Edit `config/facs/httpd-oauth2.config.json`:
         "id": "YOUR_GOOGLE_CLIENT_ID",
         "secret": "YOUR_GOOGLE_CLIENT_SECRET"
       }
-    },
-    "users": [
-      { "email": "operator@yourcompany.com" },
-      { "email": "viewer@yourcompany.com" }
-    ]
+    }
   }
 }
 ```
 
-`users` is a one-time seed: on the first start of an empty database each entry is created as `read_only_user`; assign roles afterwards in User Management.
+Users are added and assigned roles in User Management; a new user can link their Google or Microsoft login within 14 days of an admin creating or saving them.
 
 #### 3. Authentication & Roles Configuration
 

@@ -9,8 +9,7 @@
     },
     "startRedirectPath": "/oauth/google",
     "callbackUri": "http://localhost:3000/oauth/google/callback",
-    "callbackUriUI": "http://localhost:3000",
-     "users": []
+    "callbackUriUI": "http://localhost:3000"
   },
   "h1": {
     "method": "microsoft",
@@ -23,7 +22,6 @@
     },
     "startRedirectPath": "/oauth/microsoft",
     "callbackUri": "http://localhost:3000/oauth/microsoft/callback",
-    "callbackUriUI": "http://localhost:3000",
-    "users": []
+    "callbackUriUI": "http://localhost:3000"
   }
 }

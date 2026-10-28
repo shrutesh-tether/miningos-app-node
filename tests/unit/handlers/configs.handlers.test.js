@@ -260,3 +260,20 @@ test('getConfigs - aggregates results from multiple orks', async (t) => {
   t.is(result.length, 2, 'should aggregate results from both orks')
   t.pass()
 })
+
+test('getConfigs - fields keep only inclusion entries', async (t) => {
+  const payloads = []
+  const mockCtx = createMockCtxWithOrks(
+    [{ rpcPublicKey: 'key1' }],
+    async (key, method, payload) => {
+      if (method === 'getConfigs') payloads.push(payload)
+      return []
+    }
+  )
+
+  await getConfigs(mockCtx, { params: { type: 'pool' }, query: { fields: JSON.stringify({ id: 1, name: '$workerPassword' }) } })
+  await getConfigs(mockCtx, { params: { type: 'pool' }, query: { fields: JSON.stringify({ '__proto__.limit': 'x' }) } })
+
+  t.alike(payloads[0].fields, { id: 1 }, 'should drop expression values')
+  t.absent('fields' in payloads[1], 'should omit a projection with no inclusion entries')
+})

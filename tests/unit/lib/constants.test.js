@@ -5,7 +5,6 @@ const {
   SUPER_ADMIN_ROLE,
   GLOBAL_DATA_TYPES,
   SUPER_ADMIN_ID,
-  MIGRATED_USER_ROLES,
   COMMENT_ACTION,
   AUTH_PERMISSIONS,
   AUTH_LEVELS,
@@ -193,13 +192,6 @@ test('constants - POOL_PROTOCOL', (t) => {
   t.pass()
 })
 
-test('constants - MIGRATED_USER_ROLES', (t) => {
-  t.ok(typeof MIGRATED_USER_ROLES === 'object', 'should be object')
-  t.is(MIGRATED_USER_ROLES.READ_ONLY, 'read_only_user', 'should have READ_ONLY role')
-  t.is(Object.keys(MIGRATED_USER_ROLES).length, 1, 'should have 1 role')
-  t.pass()
-})
-
 test('constants - AUTH_PERMISSIONS', (t) => {
   t.ok(typeof AUTH_PERMISSIONS === 'object', 'should be object')
   t.is(AUTH_PERMISSIONS.MINER, 'miner', 'should have MINER permission')
@@ -318,7 +310,6 @@ test('constants - all exports are defined', (t) => {
   t.ok(constants.SUPER_ADMIN_ROLE, 'should export SUPER_ADMIN_ROLE')
   t.ok(constants.GLOBAL_DATA_TYPES, 'should export GLOBAL_DATA_TYPES')
   t.ok(constants.SUPER_ADMIN_ID, 'should export SUPER_ADMIN_ID')
-  t.ok(constants.MIGRATED_USER_ROLES, 'should export MIGRATED_USER_ROLES')
   t.ok(constants.COMMENT_ACTION, 'should export COMMENT_ACTION')
   t.ok(constants.AUTH_PERMISSIONS, 'should export AUTH_PERMISSIONS')
   t.ok(constants.AUTH_LEVELS, 'should export AUTH_LEVELS')
@@ -390,15 +381,6 @@ test('constants - GLOBAL_DATA_TYPES values are strings', (t) => {
   Object.values(GLOBAL_DATA_TYPES).forEach(type => {
     t.ok(typeof type === 'string', `type ${type} should be string`)
     t.ok(type.length > 0, `type ${type} should not be empty`)
-  })
-
-  t.pass()
-})
-
-test('constants - MIGRATED_USER_ROLES values are strings', (t) => {
-  Object.values(MIGRATED_USER_ROLES).forEach(role => {
-    t.ok(typeof role === 'string', `role ${role} should be string`)
-    t.ok(role.length > 0, `role ${role} should not be empty`)
   })
 
   t.pass()

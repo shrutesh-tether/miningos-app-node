@@ -9,7 +9,8 @@ const {
   flattenOrkResults,
   sortItems,
   parseRacks,
-  paginateResults
+  paginateResults,
+  assertSafeMongoQuery
 } = require('../../../workers/lib/server/lib/queryUtils')
 
 const FIELD_MAP = {
@@ -344,4 +345,20 @@ test('parseRacks - single rack', (t) => {
   const result = parseRacks({ query: { racks: 'group-1' } })
   t.alike(result, ['group-1'], 'single rack returns array with one element')
   t.pass()
+})
+
+// --- credential paths ---
+
+test('assertSafeMongoQuery - rejects filters on device credential paths', (t) => {
+  t.exception(() => assertSafeMongoQuery({ 'opts.password': { $regex: '^a' } }), /ERR_INVALID_FILTER/)
+  t.exception(() => assertSafeMongoQuery({ $or: [{ 'ctrl.conf.defaultPassword': 'x' }] }), /ERR_INVALID_FILTER/)
+  t.exception(() => assertSafeMongoQuery({ opts: { password: 'x' } }), /ERR_INVALID_FILTER/)
+  t.execution(() => assertSafeMongoQuery({ 'opts.address': { $in: ['10.0.0.1'] }, 'info.pos': 'a' }))
+})
+
+test('mapFilterFields / mapSortFields - credential paths rejected, mapped ip allowed', (t) => {
+  t.alike(mapFilterFields({ ip: '10.0.0.1' }, FIELD_MAP), { 'opts.address': '10.0.0.1' })
+  t.exception(() => mapFilterFields({ 'opts.username': 'root' }, FIELD_MAP), /ERR_INVALID_FILTER/)
+  t.alike(mapSortFields({ ip: 1 }, FIELD_MAP), { 'opts.address': 1 })
+  t.exception(() => mapSortFields({ 'opts.password': 1 }, FIELD_MAP), /ERR_INVALID_FILTER/)
 })

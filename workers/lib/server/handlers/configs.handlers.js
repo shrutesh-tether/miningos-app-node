@@ -1,7 +1,7 @@
 'use strict'
 
 const { CONFIG_TYPES, RPC_METHODS, WORKER_TYPES } = require('../../constants')
-const { flattenRpcResults } = require('../../utils')
+const { flattenRpcResults, sanitizeIncludeFields } = require('../../utils')
 const { assertSafeMongoQuery } = require('../lib/queryUtils')
 
 const VALID_CONFIG_TYPES = Object.values(CONFIG_TYPES)
@@ -28,11 +28,14 @@ async function getConfigs (ctx, req) {
   }
 
   if (req.query.fields) {
+    let fields
     try {
-      payload.fields = JSON.parse(req.query.fields)
+      fields = JSON.parse(req.query.fields)
     } catch {
       throw new Error('ERR_FIELDS_INVALID_JSON')
     }
+    const included = sanitizeIncludeFields(fields)
+    if (included) payload.fields = included
   }
 
   const configs = await ctx.dataProxy.requestData('getConfigs', payload, (res, resultsArray) => {

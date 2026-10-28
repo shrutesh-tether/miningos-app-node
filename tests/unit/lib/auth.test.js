@@ -4,7 +4,6 @@ const fs = require('fs')
 const path = require('path')
 const test = require('brittle')
 const AuthLib = require('../../../workers/lib/auth')
-const { MIGRATED_USER_ROLES } = require('../../../workers/lib/constants')
 
 const TENANT = '11111111-1111-1111-1111-111111111111'
 const msIdToken = (tid) => `h.${Buffer.from(JSON.stringify({ tid, oid: 'oid-1' })).toString('base64url')}.`
@@ -30,95 +29,6 @@ test('AuthLib - constructor', (t) => {
   t.ok(authLib._httpd === mockHttpd, 'should store httpd')
   t.ok(authLib._userService === mockUserService, 'should store userService')
   t.ok(authLib._auth === mockAuth, 'should store auth')
-
-  t.pass()
-})
-
-test('AuthLib - migrateUsers skips once users were created, even if all were deleted since', async (t) => {
-  const createUserCalls = []
-  const mockAuth = {
-    listUsers: async () => [{ id: 1, email: 'admin@example.com' }]
-  }
-  const authLib = new AuthLib({
-    httpc: {},
-    httpd: {},
-    userService: {
-      hasCreatedUsers: async () => true,
-      createUser: async (data) => createUserCalls.push(data)
-    },
-    auth: mockAuth
-  })
-
-  await authLib.migrateUsers({ conf: { users: [{ email: 'demoted@example.com', write: true }] } })
-
-  t.is(createUserCalls.length, 0, 'should not recreate legacy users')
-})
-
-test('AuthLib - migrateUsers migrates old users', async (t) => {
-  const mockUsers = [
-    { id: 1, email: 'admin@example.com' }
-  ]
-  const oldUsers = [
-    { email: 'olduser1@example.com', write: true },
-    { email: 'olduser2@example.com', write: false }
-  ]
-  const createUserCalls = []
-  const mockUserService = {
-    hasCreatedUsers: async () => false,
-    createUser: async (data) => {
-      createUserCalls.push(data)
-    }
-  }
-  const mockAuth = {
-    listUsers: async () => mockUsers
-  }
-  const authLib = new AuthLib({
-    httpc: {},
-    httpd: {},
-    userService: mockUserService,
-    auth: mockAuth
-  })
-
-  await authLib.migrateUsers({ conf: { users: oldUsers } })
-
-  t.is(createUserCalls.length, 2, 'should create users for old users')
-  t.is(createUserCalls[0].email, 'olduser1@example.com', 'should migrate first user')
-  t.is(createUserCalls[0].role, MIGRATED_USER_ROLES.READ_ONLY, 'should assign read-only role for write user')
-  t.is(createUserCalls[1].email, 'olduser2@example.com', 'should migrate second user')
-  t.is(createUserCalls[1].role, MIGRATED_USER_ROLES.READ_ONLY, 'should assign read-only role for non-write user')
-
-  t.pass()
-})
-
-test('AuthLib - migrateUsers skips super admin', async (t) => {
-  const mockUsers = [
-    { id: 1, email: 'admin@example.com' }
-  ]
-  const oldUsers = [
-    { email: 'admin@example.com', write: true },
-    { email: 'user@example.com', write: true }
-  ]
-  const createUserCalls = []
-  const mockUserService = {
-    hasCreatedUsers: async () => false,
-    createUser: async (data) => {
-      createUserCalls.push(data)
-    }
-  }
-  const mockAuth = {
-    listUsers: async () => mockUsers
-  }
-  const authLib = new AuthLib({
-    httpc: {},
-    httpd: {},
-    userService: mockUserService,
-    auth: mockAuth
-  })
-
-  await authLib.migrateUsers({ conf: { users: oldUsers } })
-
-  t.is(createUserCalls.length, 1, 'should skip super admin')
-  t.is(createUserCalls[0].email, 'user@example.com', 'should only migrate non-admin user')
 
   t.pass()
 })

@@ -1,7 +1,8 @@
 {
   "a0": {
-    "superAdmin": "test@localhost",
+    "superAdmin": "",
     "ttl": 86400,
+    "trustProxy": true,
     "superAdminPerms": [
       "miner:rw",
       "container:rw",

@@ -15,7 +15,7 @@ test('UserService - constructor', (t) => {
 })
 
 test('UserService - parseUserRow', (t) => {
-  const userService = new UserService({ sqlite: {}, auth: {} })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: {} })
   const userRow = {
     id: 123,
     email: 'test@example.com',
@@ -45,7 +45,7 @@ test('UserService - createUser lowercases email', async (t) => {
       return { id: 123, email, name: 'Test User', roles: '["admin"]' }
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.createUser({
     email: 'Test.User@Example.COM',
@@ -72,7 +72,7 @@ test('UserService - createUser', async (t) => {
       return { id: 123, email, name: 'Test User', roles: '["admin"]' }
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.createUser({
     email: 'test@example.com',
@@ -102,7 +102,7 @@ test('UserService - listUsers', async (t) => {
   const mockAuth = {
     listUsers: async () => mockUsers
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.listUsers()
 
@@ -121,7 +121,7 @@ test('UserService - listUsers with only super admin', async (t) => {
   const mockAuth = {
     listUsers: async () => mockUsers
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.listUsers()
 
@@ -148,7 +148,7 @@ test('UserService - updateUser', async (t) => {
       return { id, email: 'updated@example.com', name: 'Updated User', roles: '["admin"]' }
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.updateUser({
     id: 123,
@@ -183,7 +183,7 @@ test('UserService - updateUser lowercases email', async (t) => {
       return { id, email: 'updated@example.com', name: 'Updated User', roles: '["admin"]' }
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   await userService.updateUser({
     id: 123,
@@ -209,7 +209,7 @@ test('UserService - updateUser with null name', async (t) => {
       return { id, email: 'test@example.com', name: null, roles: '["admin"]' }
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.updateUser({
     id: 123,
@@ -235,7 +235,7 @@ test('UserService - deleteUser', async (t) => {
       return true
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.deleteUser(123)
 
@@ -257,7 +257,7 @@ test('UserService - getUser', async (t) => {
       return mockUser
     }
   }
-  const userService = new UserService({ sqlite: {}, auth: mockAuth })
+  const userService = new UserService({ sqlite: { runAsync: async () => {} }, auth: mockAuth })
 
   const result = await userService.getUser(123)
 
@@ -269,16 +269,22 @@ test('UserService - getUser', async (t) => {
   t.pass()
 })
 
-test('UserService - bindOAuthSubject binds the first subject and rejects any other', async (t) => {
+function memorySqlite () {
   const { promisify } = require('util')
   const sqlite3 = require('sqlite3')
   const db = new sqlite3.Database(':memory:')
-  const sqlite = {
+  return {
     execAsync: promisify(db.exec.bind(db)),
     runAsync: promisify(db.run.bind(db)),
     getAsync: promisify(db.get.bind(db))
   }
-  const users = { 'bob@acme.com': { id: 7 } }
+}
+
+const nowSec = () => Math.floor(Date.now() / 1000)
+
+test('UserService - bindOAuthSubject binds the first subject and rejects any other', async (t) => {
+  const sqlite = memorySqlite()
+  const users = { 'bob@acme.com': { id: 7, lastActiveAt: nowSec() } }
   const userService = new UserService({ sqlite, auth: { getUserByEmail: async (email) => users[email] } })
   await userService.init()
   await userService.init()
@@ -291,7 +297,43 @@ test('UserService - bindOAuthSubject binds the first subject and rejects any oth
   await userService.bindOAuthSubject('nobody@acme.com', 'google', 'sub-3')
   t.is(await sqlite.getAsync('SELECT * FROM oauth_subjects WHERE email = ?', ['nobody@acme.com']), undefined, 'unknown email binds nothing')
 
-  users['bob@acme.com'] = { id: 8 }
+  users['bob@acme.com'] = { id: 8, lastActiveAt: nowSec() }
   await userService.bindOAuthSubject('bob@acme.com', 'google', 'sub-2')
   t.pass('recreated user row rebinds')
+})
+
+test('UserService - bindOAuthSubject refuses a first binding for a long-idle row', async (t) => {
+  const sqlite = memorySqlite()
+  const stale = nowSec() - 60 * 24 * 60 * 60
+  const users = {
+    'bob@lapsed.com': { id: 7, lastActiveAt: stale },
+    'never@lapsed.com': { id: 9, lastActiveAt: null },
+    'admin@tether.io': { id: 1, lastActiveAt: null }
+  }
+  const auth = {
+    getUserByEmail: async (email) => users[email],
+    getUserById: async (id) => Object.entries(users).map(([email, u]) => ({ ...u, email, roles: '["admin"]' })).find(u => u.id === id),
+    genToken: async () => 'token',
+    updateUser: async () => {},
+    deleteUser: async () => {}
+  }
+  const userService = new UserService({ sqlite, auth })
+  await userService.init()
+
+  await t.exception(userService.bindOAuthSubject('bob@lapsed.com', 'google', 'attacker'), /ERR_OAUTH_BIND_WINDOW_CLOSED/)
+  await t.exception(userService.bindOAuthSubject('never@lapsed.com', 'google', 'attacker'), /ERR_OAUTH_BIND_WINDOW_CLOSED/)
+
+  await sqlite.runAsync('INSERT INTO oauth_bind_windows (userId, email, openedAt) VALUES (?, ?, ?)', [7, 'bob@lapsed.com', stale])
+  await t.exception(userService.bindOAuthSubject('bob@lapsed.com', 'google', 'attacker'), /ERR_OAUTH_BIND_WINDOW_CLOSED/, 'expired window stays closed')
+
+  await userService.updateUser({ id: 7, email: 'Bob@lapsed.com', role: 'admin', callerRoles: ['*'] })
+  await userService.bindOAuthSubject('bob@lapsed.com', 'google', 'bob')
+  t.pass('admin save reopens the window')
+
+  await userService.bindOAuthSubject('admin@tether.io', 'google', 'admin-sub')
+  await t.exception(userService.bindOAuthSubject('admin@tether.io', 'microsoft', 'other'), /ERR_OAUTH_BIND_WINDOW_CLOSED/, 'idle super admin binds only once')
+
+  await userService.deleteUser(7)
+  t.is(await sqlite.getAsync('SELECT * FROM oauth_subjects WHERE userId = 7'), undefined, 'delete drops bindings')
+  t.is(await sqlite.getAsync('SELECT * FROM oauth_bind_windows WHERE userId = 7'), undefined, 'delete drops windows')
 })
