@@ -275,3 +275,32 @@ test('getGlobalData paginates, sorts and projects the combined rebate list', asy
   t.alike(Object.keys(grouped).sort(), ['auto', 'manual'])
   t.is(grouped.auto.length, 2)
 })
+
+test('getGlobalData tags each rebate with the phase its receiver belongs to', async (t) => {
+  const c = ctx({
+    manual: [{ ts: 10, txid: TXID_C, receiver: 'bc1qother', source: 'manual' }],
+    autoResults: [[
+      { txid: TXID_A, ts: 20, receiver: 'bc1qphase1' },
+      { txid: TXID_A, ts: 20, receiver: 'bc1qphase15' }
+    ]]
+  })
+  c.conf = {
+    featureConfig: {
+      phases: [
+        { id: 'phase1', pool: { rebateAddresses: ['bc1qphase1'] } },
+        { id: 'phase1_5', pool: { rebateAddresses: ['bc1qphase15'] } }
+      ]
+    }
+  }
+
+  const rows = await getGlobalData(c, { query: { type: GLOBAL_DATA_TYPES.POOL_REBATES, sort: '{"ts":1}' } })
+
+  t.alike(rows.map((r) => [r.txid, r.phase]), [[TXID_C, null], [TXID_A, 'phase1'], [TXID_A, 'phase1_5']])
+})
+
+test('getGlobalData leaves rebates untagged on a site without phases', async (t) => {
+  const rows = await getGlobalData(ctx({ autoResults: [[{ txid: TXID_A, ts: 1, receiver: 'bc1qphase1' }]] }), {
+    query: { type: GLOBAL_DATA_TYPES.POOL_REBATES }
+  })
+  t.absent('phase' in rows[0])
+})

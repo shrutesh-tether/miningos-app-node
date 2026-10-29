@@ -7,6 +7,7 @@ const {
   RPC_METHODS,
   WORKER_TYPES
 } = require('../../constants')
+const lPhases = require('../../phases.utils')
 
 // Synced rebates live in the mempool worker (it reads and stores everything
 // that comes from mempool.space); app-node only stores manual entries and
@@ -82,6 +83,18 @@ async function getCombinedPoolRebates (ctx, { start, end } = {}) {
   return combinePoolRebates(Array.isArray(manual) ? manual : [], auto)
 }
 
+// Stamps each rebate with the id of the phase whose pool.rebateAddresses list
+// its receiver - null when none does, so it counts toward the site total only.
+function tagRebatePhases (poolRebates, phases) {
+  const phaseByAddress = new Map()
+  for (const phase of phases) {
+    for (const addr of lPhases.getPhaseRebateAddresses(phase)) {
+      if (!phaseByAddress.has(addr)) phaseByAddress.set(addr, phase.id)
+    }
+  }
+  return poolRebates.map((row) => ({ ...row, phase: phaseByAddress.get(row?.receiver) ?? null }))
+}
+
 // requestDataMap returns one entry per ork, each the ork's per-worker result
 // array; a worker failure arrives as {error}. Success anywhere is enough -
 // the write is idempotent by txid - but an error-only reply must surface.
@@ -119,6 +132,7 @@ module.exports = {
   getAutoPoolRebates,
   combinePoolRebates,
   getCombinedPoolRebates,
+  tagRebatePhases,
   updateAutoPoolRebate,
   deleteAutoPoolRebate
 }

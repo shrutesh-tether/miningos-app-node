@@ -5,10 +5,12 @@ const { parseJsonQueryParam, sanitizeIncludeFields } = require('../../utils')
 const {
   getAutoPoolRebates,
   getCombinedPoolRebates,
+  tagRebatePhases,
   updateAutoPoolRebate,
   deleteAutoPoolRebate
 } = require('./rebates.utils')
 const { priceBucket, fetchBucketPrices } = require('./finance.utils')
+const { getPhases } = require('../../phases.utils')
 
 async function getGlobalData (ctx, req) {
   const type = req.query.type
@@ -67,10 +69,14 @@ async function getPoolRebatesData (ctx, req, range) {
     (range.lt === undefined || row.ts < range.lt) &&
     (range.lte === undefined || row.ts <= range.lte))
 
+  // On a phased site every row says which phase claims it.
+  const phases = getPhases(ctx)
+  const rows = phases ? tagRebatePhases(bounded, phases) : bounded
+
   const offset = req.query.offset !== undefined ? Number(req.query.offset) : undefined
   const limit = req.query.limit !== undefined ? Number(req.query.limit) : undefined
 
-  const res = ctx.globalDataLib.filterData(bounded, {
+  const res = ctx.globalDataLib.filterData(rows, {
     queryJSON: req.query.query,
     fields: req.query.fields,
     sort: req.query.sort,
